@@ -65,7 +65,10 @@ def room_info():
 
 @app.route("/api/create_room", methods=["POST"])
 def create_room():
+    print("👉 [로그] 방 생성 API 호출됨!") # 이렇게 추가하면 Logs 탭에 출력됩니다.
+    
     data = request.get_json(force=True, silent=True) or {}
+    print(f"👉 [로그] 전달받은 데이터: {data}")
     title = (data.get("title") or "").strip()[:60]
     mode = data.get("mode") if data.get("mode") in VALID_MODES else "draw"
     gender_split = bool(data.get("gender_split")) and mode == "draw"
@@ -86,12 +89,15 @@ def create_room():
         )
         if resp.status_code == 201:
             room = resp.json()[0]
+            print(f"👉 [에러 발생] Supabase 통신 실패: {resp.text}") # 에러 원인 확인용
             return jsonify({
                 "room_id": room["id"], "code": code, "host_token": host_token,
                 "mode": mode, "gender_split": gender_split,
             })
         if resp.status_code != 409:
             return jsonify({"error": resp.text}), 500
+        
+        
     return jsonify({"error": "방 코드를 생성하지 못했어요. 다시 시도해주세요."}), 500
 
 
