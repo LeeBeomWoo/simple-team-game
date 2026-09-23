@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>제비뽑기 · 참가</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pretendard@1.3.9/dist/web/static/pretendard.min.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --navy:#1B2A4A; --navy-deep:#121D33; --gold:#E8B958; --rose:#D98A8A;
+    --paper:#F3EFE6; --line:rgba(243,239,230,0.16);
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; min-height:100vh; background:var(--navy);
+    background-image: radial-gradient(circle at 80% 100%, rgba(232,185,88,0.10), transparent 45%);
+    color:var(--paper); font-family:'Pretendard', -apple-system, sans-serif;
+    display:flex; justify-content:center; align-items:center;
+  }
+  main{ width:100%; max-width:420px; padding:28px 22px; }
+  .eyebrow{ color:var(--gold); font-size:14px; margin:0 0 6px; text-align:center; }
+  h1{ font-family:'Fraunces', serif; font-weight:600; font-size:24px; margin:0 0 22px; text-align:center; line-height:1.3; }
+  .card{ background:var(--navy-deep); border:1px solid var(--line); border-radius:14px; padding:24px; }
+  label{ display:block; font-size:13px; color:#C9D0DE; margin-bottom:6px; }
+  input{
+    width:100%; padding:13px 14px; border-radius:8px; border:1px solid var(--line);
+    background:var(--navy); color:var(--paper); font-size:17px; font-family:inherit; margin-bottom:14px;
+  }
+  input#code{ text-transform:uppercase; letter-spacing:0.12em; }
+  input:focus{ outline:2px solid var(--gold); outline-offset:1px; }
+  .gender-toggle{ display:flex; gap:8px; margin-bottom:14px; }
+  .gender-toggle button{
+    flex:1; margin:0; padding:12px; border-radius:8px; border:1px solid var(--line);
+    background:var(--navy); color:#C9D0DE; font-weight:600; font-size:15px; font-family:inherit; cursor:pointer;
+  }
+  .gender-toggle button.active{ background:var(--gold); color:var(--navy-deep); border-color:var(--gold); }
+  button.primary{
+    width:100%; padding:14px; border:none; border-radius:8px;
+    background:var(--gold); color:var(--navy-deep); font-weight:700; font-size:16px; font-family:inherit; cursor:pointer;
+  }
+  button.primary:disabled{ opacity:0.45; cursor:default; }
+  .msg{ font-size:13px; color:#E9958C; min-height:18px; margin-top:10px; text-align:center; }
+  .wait{ text-align:center; padding:20px 0; }
+  .wait .name{ font-size:15px; color:#C9D0DE; margin-bottom:6px; }
+  .dots{ font-size:14px; color:var(--gold); }
+  .reveal{ text-align:center; padding:10px 0 4px; }
+  .reveal .label{ font-size:14px; color:#9AA4B8; margin-bottom:10px; }
+  .reveal .number{ font-family:'Fraunces', serif; font-weight:700; font-size:88px; color:var(--gold); line-height:1; }
+  .reveal .partner{ font-family:'Fraunces', serif; font-weight:600; font-size:26px; color:var(--paper); margin-top:10px; }
+  .reveal .unmatched{ font-size:16px; color:var(--rose); margin-top:6px; }
+</style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">GUEST</p>
+  <h1 id="pageTitle">방 코드를 입력하세요</h1>
+
+  <div class="card">
+    <div id="codeStep">
+      <label for="code">방 코드</label>
+      <input id="code" maxlength="5" placeholder="ABCDE" />
+      <button class="primary" id="nextBtn">다음</button>
+      <p class="msg" id="codeMsg"></p>
+    </div>
+
+    <div id="joinStep" style="display:none;">
+      <label for="name">이름</label>
+      <input id="name" maxlength="30" placeholder="홍길동" />
+      <div id="genderField" style="display:none;">
+        <label>성별</label>
+        <div class="gender-toggle">
+          <button type="button" id="genderM">남</button>
+          <button type="button" id="genderF">여</button>
+        </div>
+      </div>
+      <button class="primary" id="joinBtn">참가하기</button>
+      <p class="msg" id="joinMsg"></p>
+    </div>
+
+    <div id="waitBox" class="wait" style="display:none;">
+      <div class="name" id="whoAmI"></div>
+      <div class="dots" id="waitDots">방장이 시작하기를 기다리는 중…</div>
+    </div>
+
+    <div id="revealBox" class="reveal" style="display:none;">
+      <div class="label" id="revealLabel">결과</div>
+      <div id="revealBody"></div>
+    </div>
+  </div>
+</main>
+
+<script>
+let supabase, participantId, roomMode, needsGender = false, gender = null;
+
+function escapeHtmlGuest(str){
+  return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function loadConfig(){
+  const res = await fetch('/api/config');
+  const cfg = await res.json();
+  supabase = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+}
+
+document.getElementById('genderM').addEventListener('click', () => setGender('M'));
+document.getElementById('genderF').addEventListener('click', () => setGender('F'));
+function setGender(g){
+  gender = g;
+  document.getElementById('genderM').classList.toggle('active', g === 'M');
+  document.getElementById('genderF').classList.toggle('active', g === 'F');
+}
+
+document.getElementById('nextBtn').addEventListener('click', async () => {
+  const code = document.getElementById('code').value.trim().toUpperCase();
+  const btn = document.getElementById('nextBtn');
+  document.getElementById('codeMsg').textContent = '';
+  if(!code){
+    document.getElementById('codeMsg').textContent = '코드를 입력해주세요.';
+    return;
+  }
+  btn.disabled = true;
+  try{
+    const res = await fetch(`/api/room_info?code=${encodeURIComponent(code)}`);
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error || '방을 찾을 수 없어요.');
+    if(data.status !== 'waiting') throw new Error('이미 시작된 방이라 더 이상 참가할 수 없어요.');
+    roomMode = data.mode;
+    needsGender = roomMode === 'couple' || (roomMode === 'draw' && data.gender_split);
+    document.getElementById('pageTitle').textContent = data.title || '참가하기';
+    document.getElementById('genderField').style.display = needsGender ? 'block' : 'none';
+    document.getElementById('codeStep').style.display = 'none';
+    document.getElementById('joinStep').style.display = 'block';
+    window.__code = code;
+  }catch(err){
+    document.getElementById('codeMsg').textContent = err.message;
+  }finally{
+    btn.disabled = false;
+  }
+});
+
+document.getElementById('joinBtn').addEventListener('click', async () => {
+  const name = document.getElementById('name').value.trim();
+  const btn = document.getElementById('joinBtn');
+  document.getElementById('joinMsg').textContent = '';
+  if(!name){
+    document.getElementById('joinMsg').textContent = '이름을 입력해주세요.';
+    return;
+  }
+  if(needsGender && !gender){
+    document.getElementById('joinMsg').textContent = '성별을 선택해주세요.';
+    return;
+  }
+  btn.disabled = true;
+  try{
+    const res = await fetch('/api/join', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ code: window.__code, name, gender })
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error || '참가하지 못했어요.');
+    participantId = data.participant_id;
+    document.getElementById('whoAmI').textContent = `${name}님, 참가 완료`;
+    document.getElementById('joinStep').style.display = 'none';
+    document.getElementById('waitBox').style.display = 'block';
+    subscribeResult();
+  }catch(err){
+    document.getElementById('joinMsg').textContent = err.message;
+    btn.disabled = false;
+  }
+});
+
+function subscribeResult(){
+  supabase.channel(`participant-${participantId}`)
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'draw_results', filter: `participant_id=eq.${participantId}` },
+      async (payload) => showResult(payload.new))
+    .subscribe();
+}
+
+async function showResult(row){
+  document.getElementById('waitBox').style.display = 'none';
+  document.getElementById('revealBox').style.display = 'block';
+  const body = document.getElementById('revealBody');
+
+  if(roomMode === 'draw'){
+    if(!row.assigned_number){
+      document.getElementById('revealLabel').textContent = `${row.round_no}라운드`;
+      body.innerHTML = `<div class="unmatched">성별 정보가 없어 이번 라운드는 번호를 받지 못했어요.</div>`;
+      return;
+    }
+    document.getElementById('revealLabel').textContent = '당신의 번호는';
+    body.innerHTML = `<div class="number">${row.assigned_number}</div>${row.role_label ? `<div class="partner">${escapeHtmlGuest(row.role_label)}</div>` : ''}`;
+    return;
+  }
+
+  if(!row.partner_id){
+    document.getElementById('revealLabel').textContent = `${row.round_no}라운드`;
+    body.innerHTML = `<div class="unmatched">이번 라운드는 짝이 없어요.<br/>다음 라운드를 기다려주세요.</div>`;
+  }else{
+    const { data: partner } = await supabase.from('participants').select('name').eq('id', row.partner_id).single();
+    document.getElementById('revealLabel').textContent = `${row.round_no}라운드 · 당신의 커플 번호는`;
+    body.innerHTML = `<div class="number">${row.assigned_number}</div><div class="partner">${(partner && partner.name) || '?'} 님과 매칭</div>`;
+  }
+}
+
+loadConfig();
+</script>
+</body>
+</html>
