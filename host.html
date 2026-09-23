@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>제비뽑기 · 호스트</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pretendard@1.3.9/dist/web/static/pretendard.min.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --navy:#1B2A4A; --navy-deep:#121D33; --gold:#E8B958; --rose:#D98A8A;
+    --paper:#F3EFE6; --line:rgba(243,239,230,0.16);
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; min-height:100vh; background:var(--navy);
+    background-image: radial-gradient(circle at 20% 0%, rgba(232,185,88,0.10), transparent 45%);
+    color:var(--paper); font-family:'Pretendard', -apple-system, sans-serif;
+    display:flex; justify-content:center;
+  }
+  main{ width:100%; max-width:480px; padding:32px 22px 60px; }
+  .eyebrow{ color:var(--gold); font-size:14px; margin:0 0 6px; }
+  h1{ font-family:'Fraunces', serif; font-weight:600; font-size:28px; margin:0 0 26px; line-height:1.3; }
+  .card{ background:var(--navy-deep); border:1px solid var(--line); border-radius:14px; padding:22px; margin-bottom:16px; }
+  label{ display:block; font-size:13px; color:#C9D0DE; margin-bottom:6px; }
+  input{
+    width:100%; padding:12px 14px; border-radius:8px; border:1px solid var(--line);
+    background:var(--navy); color:var(--paper); font-size:16px; font-family:inherit;
+  }
+  input:focus{ outline:2px solid var(--gold); outline-offset:1px; }
+  .mode-toggle{ display:flex; gap:8px; margin-bottom:16px; }
+  .mode-toggle button{
+    flex:1; margin:0; padding:12px; border-radius:8px; border:1px solid var(--line);
+    background:var(--navy); color:#C9D0DE; font-weight:600; font-size:14px;
+  }
+  .mode-toggle button.active{ background:var(--gold); color:var(--navy-deep); border-color:var(--gold); }
+  .checkbox-row{ display:flex; align-items:center; gap:8px; font-size:14px; color:#C9D0DE; margin-bottom:14px; cursor:pointer; }
+  .checkbox-row input{ width:auto; margin:0; }
+  .roles-editor{ margin-top:6px; }
+  .role-row{ display:flex; gap:8px; margin-bottom:8px; }
+  .role-row input.role-num{ width:64px; flex:none; text-align:center; }
+  .role-row input.role-text{ flex:1; }
+  .role-actions{ display:flex; gap:8px; margin-top:4px; }
+  .role-actions button{ margin-top:0; flex:1; padding:10px; font-size:14px; }
+  button{
+    width:100%; padding:14px; margin-top:14px; border:none; border-radius:8px;
+    background:var(--gold); color:var(--navy-deep); font-weight:700; font-size:16px;
+    font-family:inherit; cursor:pointer;
+  }
+  button:disabled{ opacity:0.45; cursor:default; }
+  button.secondary{ background:transparent; border:1px solid var(--gold); color:var(--gold); }
+  .code-box{ text-align:center; padding:24px 0 6px; }
+  .code{ font-family:'Fraunces', serif; font-size:48px; letter-spacing:0.08em; color:var(--gold); font-weight:600; }
+  .code-hint{ font-size:13px; color:#9AA4B8; margin-top:4px; }
+  .round-tag{ font-size:13px; color:var(--gold); text-align:center; margin-bottom:10px; }
+  .plist{ list-style:none; margin:14px 0 0; padding:0; }
+  .plist li{ display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-top:1px solid var(--line); font-size:15px; }
+  .plist li:first-child{ border-top:none; }
+  .tag{ font-size:12px; color:#9AA4B8; margin-left:6px; }
+  .num{ font-family:'Fraunces', serif; color:var(--gold); font-weight:600; }
+  .couple-list{ list-style:none; margin:14px 0 0; padding:0; }
+  .couple-list li{
+    padding:12px 14px; border:1px solid var(--line); border-radius:10px; margin-bottom:8px;
+    display:flex; align-items:center; justify-content:space-between; font-size:15px;
+  }
+  .couple-list .cnum{ font-family:'Fraunces', serif; color:var(--gold); font-weight:700; font-size:18px; margin-right:10px; }
+  .unmatched{ font-size:13px; color:var(--rose); margin-top:10px; }
+  .empty{ color:#8892A4; font-size:14px; padding:8px 0; }
+  .msg{ font-size:13px; color:#E9958C; min-height:18px; margin-top:8px; }
+  .count{ font-size:13px; color:#9AA4B8; margin-top:2px; }
+</style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">HOST</p>
+  <h1>방을 만들고<br/>참가자를 모아보세요</h1>
+
+  <section id="setup" class="card">
+    <label>모드 선택</label>
+    <div class="mode-toggle">
+      <button type="button" id="modeDrawBtn" class="active">제비뽑기</button>
+      <button type="button" id="modeCoupleBtn">커플매칭</button>
+    </div>
+    <label for="title">방 이름 (선택)</label>
+    <input id="title" placeholder="예: 팀 청소 당번 뽑기" maxlength="60" />
+    <label id="genderSplitRow" class="checkbox-row">
+      <input type="checkbox" id="genderSplitChk" />
+      <span>남녀 홀짝 배정 (남: 홀수 / 여: 짝수)</span>
+    </label>
+    <button id="createBtn">방 만들기</button>
+    <p class="msg" id="setupMsg"></p>
+  </section>
+
+  <section id="room" class="card" style="display:none;">
+    <div class="code-box">
+      <div class="code" id="roomCode">-----</div>
+      <div class="code-hint">참가자에게 이 코드를 알려주세요</div>
+    </div>
+    <div class="count" id="joinCount">참가자 0명</div>
+    <ul class="plist" id="plist"><li class="empty">아직 참가자가 없어요</li></ul>
+
+    <div id="rolesEditor" class="roles-editor" style="display:none;">
+      <label>번호별 역할 미리 정하기 (선택)</label>
+      <div id="roleRows"></div>
+      <div class="role-actions">
+        <button type="button" id="addRoleRowBtn" class="secondary" style="margin-top:0;">행 추가</button>
+        <button type="button" id="saveRolesBtn" class="secondary" style="margin-top:0;">역할 저장</button>
+      </div>
+      <p class="msg" id="rolesMsg"></p>
+    </div>
+
+    <div id="roundTag" class="round-tag" style="display:none;"></div>
+    <ul class="couple-list" id="coupleList" style="display:none;"></ul>
+    <p class="unmatched" id="unmatchedMsg" style="display:none;"></p>
+
+    <button id="drawBtn">뽑기 시작</button>
+    <button id="newRoomBtn" class="secondary" style="margin-top:10px;">새 방 만들기</button>
+    <p class="msg" id="roomMsg"></p>
+  </section>
+</main>
+
+<script>
+let supabase, roomId, roomCode, hostToken, mode = 'draw', channel;
+
+async function loadConfig(){
+  const res = await fetch('/api/config');
+  const cfg = await res.json();
+  supabase = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+}
+
+function escapeHtml(str){
+  return str.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+document.getElementById('modeDrawBtn').addEventListener('click', () => setMode('draw'));
+document.getElementById('modeCoupleBtn').addEventListener('click', () => setMode('couple'));
+function setMode(m){
+  mode = m;
+  document.getElementById('modeDrawBtn').classList.toggle('active', m === 'draw');
+  document.getElementById('modeCoupleBtn').classList.toggle('active', m === 'couple');
+  document.getElementById('genderSplitRow').style.display = m === 'draw' ? 'flex' : 'none';
+}
+
+async function refreshParticipants(){
+  const { data } = await supabase.from('participants').select('*').eq('room_id', roomId);
+  renderParticipants(data || []);
+}
+
+function renderParticipants(rows){
+  const list = document.getElementById('plist');
+  document.getElementById('joinCount').textContent = `참가자 ${rows.length}명`;
+  if(rows.length === 0){
+    list.innerHTML = '<li class="empty">아직 참가자가 없어요</li>';
+    return;
+  }
+  list.innerHTML = rows
+    .sort((a,b) => new Date(a.joined_at) - new Date(b.joined_at))
+    .map(p => `<li><span>${escapeHtml(p.name)}${p.gender ? `<span class="tag">${p.gender === 'M' ? '남' : '여'}</span>` : ''}</span></li>`)
+    .join('');
+}
+
+async function refreshRoundResults(){
+  const res = await fetch(`/api/room_info?code=${roomCode}`);
+  const info = await res.json();
+  if(!res.ok) return;
+
+  const { data: results } = await supabase
+    .from('draw_results').select('*').eq('room_id', roomId);
+  if(!results || results.length === 0) return;
+
+  const latestRound = Math.max(...results.map(r => r.round_no));
+  const latest = results.filter(r => r.round_no === latestRound);
+  document.getElementById('roundTag').style.display = 'block';
+  document.getElementById('roundTag').textContent = `${latestRound}라운드 결과`;
+
+  const { data: participants } = await supabase.from('participants').select('*').eq('room_id', roomId);
+  const nameOf = id => (participants.find(p => p.id === id) || {}).name || '?';
+
+  if(mode === 'draw'){
+    document.getElementById('coupleList').style.display = 'none';
+    const numbered = {};
+    latest.forEach(r => { numbered[r.participant_id] = r; });
+    document.getElementById('plist').innerHTML = participants
+      .sort((a,b) => new Date(a.joined_at) - new Date(b.joined_at))
+      .map(p => {
+        const r = numbered[p.id];
+        const genderTag = p.gender ? `<span class="tag">${p.gender === 'M' ? '남' : '여'}</span>` : '';
+        const right = r && r.assigned_number
+          ? `<span class="num">${r.assigned_number}번${r.role_label ? ' · ' + escapeHtml(r.role_label) : ''}</span>`
+          : (r ? '<span class="tag">미배정</span>' : '');
+        return `<li><span>${escapeHtml(p.name)}${genderTag}</span>${right}</li>`;
+      })
+      .join('');
+  }else{
+    const seen = new Set();
+    const couples = [];
+    let unmatched = [];
+    latest.forEach(r => {
+      if(!r.partner_id){ unmatched.push(nameOf(r.participant_id)); return; }
+      const key = [r.participant_id, r.partner_id].sort().join('-');
+      if(seen.has(key)) return;
+      seen.add(key);
+      couples.push({ num: r.assigned_number, a: nameOf(r.participant_id), b: nameOf(r.partner_id) });
+    });
+    couples.sort((a,b) => a.num - b.num);
+    document.getElementById('coupleList').style.display = 'block';
+    document.getElementById('coupleList').innerHTML = couples
+      .map(c => `<li><span><span class="cnum">${c.num}</span>${escapeHtml(c.a)} ♥ ${escapeHtml(c.b)}</span></li>`)
+      .join('') || '<li class="empty">매칭 결과가 없어요</li>';
+    const um = document.getElementById('unmatchedMsg');
+    if(unmatched.length){
+      um.style.display = 'block';
+      um.textContent = `짝을 찾지 못한 참가자: ${unmatched.join(', ')}`;
+    }else{
+      um.style.display = 'none';
+    }
+  }
+}
+
+async function subscribeRoom(){
+  channel = supabase.channel(`room-${roomId}`)
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'participants', filter: `room_id=eq.${roomId}` },
+      () => refreshParticipants())
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'draw_results', filter: `room_id=eq.${roomId}` },
+      () => refreshRoundResults())
+    .subscribe();
+}
+
+document.getElementById('createBtn').addEventListener('click', async () => {
+  const title = document.getElementById('title').value;
+  const btn = document.getElementById('createBtn');
+  btn.disabled = true;
+  document.getElementById('setupMsg').textContent = '';
+  try{
+    const genderSplit = mode === 'draw' && document.getElementById('genderSplitChk').checked;
+    const res = await fetch('/api/create_room', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ title, mode, gender_split: genderSplit })
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error || '방을 만들지 못했어요.');
+    roomId = data.room_id; roomCode = data.code; hostToken = data.host_token; mode = data.mode;
+    document.getElementById('roomCode').textContent = roomCode;
+    document.getElementById('drawBtn').textContent = mode === 'couple' ? '매칭 시작' : '뽑기 시작';
+    document.getElementById('setup').style.display = 'none';
+    document.getElementById('room').style.display = 'block';
+    if(mode === 'draw'){
+      document.getElementById('rolesEditor').style.display = 'block';
+      addRoleRow();
+    }
+    await subscribeRoom();
+    await refreshParticipants();
+  }catch(err){
+    document.getElementById('setupMsg').textContent = err.message;
+  }finally{
+    btn.disabled = false;
+  }
+});
+
+document.getElementById('drawBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('drawBtn');
+  btn.disabled = true;
+  document.getElementById('roomMsg').textContent = '';
+  try{
+    const res = await fetch('/api/start_round', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ room_id: roomId, host_token: hostToken })
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error || '시작하지 못했어요.');
+    btn.textContent = mode === 'couple' ? '다시 매칭하기' : '다시 뽑기';
+    let msg = mode === 'couple' ? `${data.couples}커플이 매칭됐어요.` : `${data.count}명에게 번호를 나눠줬어요.`;
+    if(data.unmatched && data.unmatched.length){
+      msg += ` (성별 미입력으로 배정 못한 인원: ${data.unmatched.join(', ')})`;
+    }
+    document.getElementById('roomMsg').textContent = msg;
+    await refreshRoundResults();
+  }catch(err){
+    document.getElementById('roomMsg').textContent = err.message;
+  }finally{
+    btn.disabled = false;
+  }
+});
+
+function addRoleRow(num, text){
+  const wrap = document.getElementById('roleRows');
+  const nextNum = num || wrap.children.length + 1;
+  const row = document.createElement('div');
+  row.className = 'role-row';
+  row.innerHTML = `
+    <input type="number" class="role-num" min="1" value="${nextNum}" />
+    <input type="text" class="role-text" placeholder="예: 청소, 설거지" maxlength="40" value="${text ? escapeHtml(text) : ''}" />
+  `;
+  wrap.appendChild(row);
+}
+
+document.getElementById('addRoleRowBtn').addEventListener('click', () => addRoleRow());
+
+document.getElementById('saveRolesBtn').addEventListener('click', async () => {
+  const rows = [...document.querySelectorAll('#roleRows .role-row')];
+  const roles = {};
+  rows.forEach(row => {
+    const num = row.querySelector('.role-num').value.trim();
+    const text = row.querySelector('.role-text').value.trim();
+    if(num && text) roles[num] = text;
+  });
+  document.getElementById('rolesMsg').textContent = '';
+  try{
+    const res = await fetch('/api/set_roles', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ room_id: roomId, host_token: hostToken, roles })
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error || '저장하지 못했어요.');
+    document.getElementById('rolesMsg').textContent = '저장했어요. 뽑기 시작 시 반영돼요.';
+  }catch(err){
+    document.getElementById('rolesMsg').textContent = err.message;
+  }
+});
+
+document.getElementById('newRoomBtn').addEventListener('click', () => location.reload());
+
+loadConfig();
+</script>
+</body>
+</html>
