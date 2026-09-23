@@ -24,7 +24,7 @@
   .eyebrow{ color:var(--gold); font-size:14px; margin:0 0 6px; }
   h1{ font-family:'Fraunces', serif; font-weight:600; font-size:28px; margin:0 0 26px; line-height:1.3; }
   .card{ background:var(--navy-deep); border:1px solid var(--line); border-radius:14px; padding:22px; margin-bottom:16px; }
-  label{ display:block; font-size:13px; color:#C9D0DE; margin-bottom:6px; }
+  label, .field-label{ display:block; font-size:13px; color:#C9D0DE; margin-bottom:6px; }
   input{
     width:100%; padding:12px 14px; border-radius:8px; border:1px solid var(--line);
     background:var(--navy); color:var(--paper); font-size:16px; font-family:inherit;
@@ -78,7 +78,7 @@
   <h1>방을 만들고<br/>참가자를 모아보세요</h1>
 
   <section id="setup" class="card">
-    <label>모드 선택</label>
+    <div class="field-label">모드 선택</div>
     <div class="mode-toggle">
       <button type="button" id="modeDrawBtn" class="active">제비뽑기</button>
       <button type="button" id="modeCoupleBtn">커플매칭</button>
@@ -102,7 +102,7 @@
     <ul class="plist" id="plist"><li class="empty">아직 참가자가 없어요</li></ul>
 
     <div id="rolesEditor" class="roles-editor" style="display:none;">
-      <label>번호별 역할 미리 정하기 (선택)</label>
+      <div class="field-label">번호별 역할 미리 정하기 (선택)</div>
       <div id="roleRows"></div>
       <div class="role-actions">
         <button type="button" id="addRoleRowBtn" class="secondary" style="margin-top:0;">행 추가</button>
@@ -129,8 +129,7 @@ async function loadConfig(){
   const cfg = await res.json();
   supabase = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
 }
-// 이 부분을 추가하여 함수를 실제로 실행시켜야 합니다.
-loadConfig();
+
 function escapeHtml(str){
   return str.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
