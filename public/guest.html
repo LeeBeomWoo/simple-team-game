@@ -93,7 +93,7 @@
 </main>
 
 <script>
-let supabase, participantId, roomMode, needsGender = false, gender = null;
+let sb, participantId, roomMode, needsGender = false, gender = null;
 
 function escapeHtmlGuest(str){
   return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -102,7 +102,7 @@ function escapeHtmlGuest(str){
 async function loadConfig(){
   const res = await fetch('/api/config');
   const cfg = await res.json();
-  supabase = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+  sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
 }
 
 document.getElementById('genderM').addEventListener('click', () => setGender('M'));
@@ -173,7 +173,7 @@ document.getElementById('joinBtn').addEventListener('click', async () => {
 });
 
 function subscribeResult(){
-  supabase.channel(`participant-${participantId}`)
+  sb.channel(`participant-${participantId}`)
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'draw_results', filter: `participant_id=eq.${participantId}` },
       async (payload) => showResult(payload.new))
     .subscribe();
@@ -199,7 +199,7 @@ async function showResult(row){
     document.getElementById('revealLabel').textContent = `${row.round_no}라운드`;
     body.innerHTML = `<div class="unmatched">이번 라운드는 짝이 없어요.<br/>다음 라운드를 기다려주세요.</div>`;
   }else{
-    const { data: partner } = await supabase.from('participants').select('name').eq('id', row.partner_id).single();
+    const { data: partner } = await sb.from('participants').select('name').eq('id', row.partner_id).single();
     document.getElementById('revealLabel').textContent = `${row.round_no}라운드 · 당신의 커플 번호는`;
     body.innerHTML = `<div class="number">${row.assigned_number}</div><div class="partner">${(partner && partner.name) || '?'} 님과 매칭</div>`;
   }
