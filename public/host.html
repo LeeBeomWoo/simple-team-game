@@ -129,7 +129,8 @@ async function loadConfig(){
   const cfg = await res.json();
   supabase = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
 }
-
+// 이 부분을 추가하여 함수를 실제로 실행시켜야 합니다.
+loadConfig();
 function escapeHtml(str){
   return str.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
