@@ -1,26 +1,14 @@
 {
+  "version": 2,
   "builds": [
-    {
-      "src": "api/index.py",
-      "use": "@vercel/python"
-    }
+    { "src": "api/index.py", "use": "@vercel/python" },
+    { "src": "public/**", "use": "@vercel/static" }
   ],
-  "rewrites": [
-    {
-      "source": "/api/(.*)",
-      "destination": "/api/index.py"
-    },
-    {
-      "source": "/host",
-      "destination": "/public/host.html"
-    },
-    {
-      "source": "/guest",
-      "destination": "/public/guest.html"
-    },
-    {
-      "source": "/",
-      "destination": "/public/host.html"
-    }
+  "routes": [
+    { "src": "/api/(.*)", "dest": "api/index.py" },
+    { "src": "/host", "dest": "/public/host.html" },
+    { "src": "/guest", "dest": "/public/guest.html" },
+    { "src": "/", "dest": "/public/host.html" },
+    { "src": "/(.*)", "dest": "/public/$1" }
   ]
 }
