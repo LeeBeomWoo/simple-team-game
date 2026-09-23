@@ -65,10 +65,11 @@ def room_info():
 
 @app.route("/api/create_room", methods=["POST"])
 def create_room():
-    print("👉 [로그] 방 생성 API 호출됨!") # 이렇게 추가하면 Logs 탭에 출력됩니다.
+    print("👉 [로그] 방 생성 API 호출됨!")
     
     data = request.get_json(force=True, silent=True) or {}
     print(f"👉 [로그] 전달받은 데이터: {data}")
+    
     title = (data.get("title") or "").strip()[:60]
     mode = data.get("mode") if data.get("mode") in VALID_MODES else "draw"
     gender_split = bool(data.get("gender_split")) and mode == "draw"
@@ -89,14 +90,14 @@ def create_room():
         )
         if resp.status_code == 201:
             room = resp.json()[0]
-            print(f"👉 [에러 발생] Supabase 통신 실패: {resp.text}") # 에러 원인 확인용
+            print(f"👉 [성공] 방 생성 완료: {code}")
             return jsonify({
                 "room_id": room["id"], "code": code, "host_token": host_token,
                 "mode": mode, "gender_split": gender_split,
             })
+        print(f"👉 [중계 에러] 상태코드: {resp.status_code}, 내용: {resp.text}")
         if resp.status_code != 409:
             return jsonify({"error": resp.text}), 500
-        
         
     return jsonify({"error": "방 코드를 생성하지 못했어요. 다시 시도해주세요."}), 500
 
@@ -176,7 +177,6 @@ def fetch_participants(room_id):
 
 
 def fetch_past_pairs(room_id):
-    """이 방에서 지금까지 커플로 묶인 적 있는 (참가자, 참가자) 쌍의 집합을 반환."""
     resp = requests.get(
         sb_url("draw_results"),
         headers=sb_headers(),
@@ -195,8 +195,6 @@ def fetch_past_pairs(room_id):
 
 
 def match_couples(males, females, past_pairs, attempts=300):
-    """남녀를 짝지으면서 과거 라운드에 이미 묶였던 쌍을 최대한 피한다.
-    무작위 셔플을 여러 번 시도해 과거 이력과 충돌이 가장 적은 조합을 고른다."""
     best = None
     best_conflicts = None
     k = min(len(males), len(females))
@@ -243,7 +241,6 @@ def start_round():
             others = [p["id"] for p in participants if p["gender"] not in ("M", "F")]
             random.shuffle(males)
             random.shuffle(females)
-            # 남: 홀수(1,3,5,...) / 여: 짝수(2,4,6,...)
             assignments = [(pid, 2 * i + 1) for i, pid in enumerate(males)]
             assignments += [(pid, 2 * i + 2) for i, pid in enumerate(females)]
             for pid in others:
