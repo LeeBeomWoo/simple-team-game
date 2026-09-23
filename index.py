@@ -8,9 +8,9 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
-SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
-ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
+SUPABASE_URL = os.environ.get("Project_URL", "")
+SERVICE_KEY = os.environ.get("service_role", "")
+ANON_KEY = os.environ.get("anon_public", "")
 
 CODE_ALPHABET = "".join(c for c in string.ascii_uppercase if c not in "OI") + "23456789"
 VALID_MODES = {"draw", "couple"}
