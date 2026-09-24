@@ -10,5 +10,8 @@
     { "src": "/guest", "dest": "/public/guest.html" },
     { "src": "/", "dest": "/public/host.html" },
     { "src": "/(.*)", "dest": "/public/$1" }
+  ],
+  "crons": [
+    { "path": "/api/cleanup", "schedule": "0 3 * * *" }
   ]
 }
