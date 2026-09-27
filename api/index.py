@@ -442,6 +442,89 @@ def start_round():
     return jsonify(result)
 
 
+@app.route("/api/delete_room", methods=["POST"])
+def delete_room():
+    data = request.get_json(force=True, silent=True) or {}
+    room_id = data.get("room_id")
+    host_token = data.get("host_token")
+    if not room_id or not host_token:
+        return jsonify({"error": "잘못된 요청이에요."}), 400
+
+    room = get_room(room_id=room_id)
+    if not room or room["host_token"] != host_token:
+        return jsonify({"error": "권한이 없어요."}), 403
+
+    # participants/draw_results는 rooms에 대한 ON DELETE CASCADE로 함께 삭제됨.
+    resp = requests.delete(
+        sb_url("rooms"),
+        headers=sb_headers(),
+        params={"id": f"eq.{room_id}"},
+        timeout=10,
+    )
+    if resp.status_code not in (200, 204):
+        return jsonify({"error": resp.text}), 500
+    return jsonify({"ok": True})
+
+
+@app.route("/api/change_mode", methods=["POST"])
+def change_mode():
+    """방을 삭제하거나 참가자를 다시 모으지 않고, 같은 참가자를 유지한 채
+    제비뽑기 <-> 커플매칭 형태를 바꾼다. 이전 라운드 결과는 형태가 바뀌면
+    더 이상 의미가 없으므로 함께 초기화한다."""
+    data = request.get_json(force=True, silent=True) or {}
+    room_id = data.get("room_id")
+    host_token = data.get("host_token")
+    new_mode = data.get("mode")
+    gender_split = bool(data.get("gender_split"))
+
+    if not room_id or not host_token or new_mode not in VALID_MODES:
+        return jsonify({"error": "잘못된 요청이에요."}), 400
+
+    room = get_room(room_id=room_id)
+    if not room or room["host_token"] != host_token:
+        return jsonify({"error": "권한이 없어요."}), 403
+
+    gender_split = gender_split and new_mode == "draw"
+
+    if new_mode == "couple":
+        participants = fetch_participants(room_id)
+        if not participants:
+            return jsonify({"error": "참가자가 없어요."}), 400
+        missing = [p["name"] for p in participants if p.get("gender") not in ("M", "F")]
+        if missing:
+            return jsonify({
+                "error": "성별 정보가 없는 참가자가 있어 커플매칭으로 바꿀 수 없어요.",
+                "missing": missing,
+            }), 400
+
+    # 이전 형태의 뽑기/매칭 결과는 새 형태와 맞지 않으므로 함께 초기화
+    requests.delete(
+        sb_url("draw_results"),
+        headers=sb_headers(),
+        params={"room_id": f"eq.{room_id}"},
+        timeout=10,
+    )
+
+    resp = requests.patch(
+        sb_url("rooms"),
+        headers=sb_headers(),
+        params={"id": f"eq.{room_id}"},
+        json={
+            "mode": new_mode,
+            "gender_split": gender_split,
+            "status": "waiting",
+            "current_round": 0,
+            "number_roles": {},
+        },
+        timeout=10,
+    )
+    if resp.status_code not in (200, 204):
+        return jsonify({"error": resp.text}), 500
+
+    touch_room(room_id)
+    return jsonify({"ok": True, "mode": new_mode, "gender_split": gender_split})
+
+
 @app.route("/api/cleanup", methods=["GET", "POST"])
 def cleanup():
     """마지막 활동 후 ROOM_INACTIVE_HOURS 시간이 지난 방을 삭제.

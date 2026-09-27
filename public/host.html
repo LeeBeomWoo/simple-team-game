@@ -640,6 +640,19 @@
 
 
     <!-- =================================================
+         형태 변경 (참가자 유지)
+         ================================================= -->
+
+    <button
+      id="changeModeBtn"
+      class="secondary"
+      style="margin-top:10px;"
+    >
+      다른 형태로 바꾸기
+    </button>
+
+
+    <!-- =================================================
          방 삭제
          ================================================= -->
 
@@ -2045,6 +2058,114 @@
             .textContent =
               err.message;
 
+
+          btn.disabled = false;
+
+        }
+
+      }
+    );
+
+
+  // =====================================================
+  // 형태 변경 (같은 참가자 유지, 방을 나가거나 새로 만들지 않음)
+  // =====================================================
+
+  document
+    .getElementById('changeModeBtn')
+    .addEventListener(
+      'click',
+      async () => {
+
+        if(!roomId || !hostToken){
+          document.getElementById('roomMsg').textContent =
+            '방 정보가 없습니다.';
+          return;
+        }
+
+        const targetMode = mode === 'draw' ? 'couple' : 'draw';
+        const targetLabel = targetMode === 'couple' ? '커플매칭' : '제비뽑기';
+
+        let targetGenderSplit = roomGenderSplit;
+        if(targetMode === 'draw'){
+          targetGenderSplit = confirm(
+            '남녀를 구분해서 번호를 나눌까요?\n' +
+            '(확인: 남/여 구분해서 번호 배정 / 취소: 구분 없이 전체 번호)'
+          );
+        }
+
+        const confirmed = confirm(
+          `참가자를 그대로 유지한 채 "${targetLabel}" 형태로 바꿀까요?\n\n` +
+          '이전 뽑기/매칭 결과는 초기화되고,\n' +
+          '참가자는 방을 나가지 않아도 됩니다.'
+        );
+        if(!confirmed) return;
+
+        const btn = document.getElementById('changeModeBtn');
+        btn.disabled = true;
+        document.getElementById('roomMsg').textContent = '형태를 바꾸는 중입니다...';
+
+        try{
+
+          const res = await fetch('/api/change_mode', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              room_id: roomId,
+              host_token: hostToken,
+              mode: targetMode,
+              gender_split: targetGenderSplit,
+            }),
+          });
+
+          const data = await res.json();
+
+          if(!res.ok){
+            const missingMsg =
+              data.missing
+                ? ` (성별 정보가 없는 참가자: ${data.missing.join(', ')})`
+                : '';
+            throw new Error(
+              (data.error || '형태를 바꾸지 못했어요.') + missingMsg
+            );
+          }
+
+          mode = data.mode;
+          roomGenderSplit = data.gender_split;
+
+          document.getElementById('drawBtn').textContent =
+            mode === 'couple' ? '매칭 시작' : '뽑기 시작';
+
+          document.getElementById('hostGenderField').style.display =
+            (mode === 'couple' || (mode === 'draw' && roomGenderSplit))
+              ? 'flex'
+              : 'none';
+
+          document.getElementById('rolesEditor').style.display =
+            mode === 'draw' ? 'block' : 'none';
+
+          if(mode === 'draw'){
+            document.getElementById('roleRows').innerHTML = '';
+            addRoleRow();
+          }
+
+          document.getElementById('roundTag').style.display = 'none';
+          document.getElementById('coupleList').style.display = 'none';
+          document.getElementById('coupleList').innerHTML = '';
+          document.getElementById('unmatchedMsg').style.display = 'none';
+          document.getElementById('unmatchedMsg').textContent = '';
+
+          document.getElementById('roomMsg').textContent =
+            `"${targetLabel}" 형태로 바뀌었어요.`;
+
+          await refreshParticipants();
+          await refreshRoundResults();
+
+        }catch(err){
+
+          document.getElementById('roomMsg').textContent = err.message;
+
+        }finally{
 
           btn.disabled = false;
 

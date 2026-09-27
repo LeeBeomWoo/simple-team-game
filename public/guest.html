@@ -180,6 +180,14 @@ function subscribeResult(){
 }
 
 async function showResult(row){
+  // 호스트가 결과 발표 사이에 형태(제비뽑기/커플매칭)를 바꿨을 수 있으니
+  // 참가 시점에 저장해둔 값 대신 최신 모드를 다시 확인한다.
+  try{
+    const infoRes = await fetch(`/api/room_info?code=${encodeURIComponent(window.__code)}`);
+    const info = await infoRes.json();
+    if(infoRes.ok) roomMode = info.mode;
+  }catch(e){}
+
   document.getElementById('waitBox').style.display = 'none';
   document.getElementById('revealBox').style.display = 'block';
   const body = document.getElementById('revealBody');
