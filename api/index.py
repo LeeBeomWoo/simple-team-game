@@ -488,8 +488,6 @@ def change_mode():
 
     if new_mode == "couple":
         participants = fetch_participants(room_id)
-        if not participants:
-            return jsonify({"error": "참가자가 없어요."}), 400
         missing = [p["name"] for p in participants if p.get("gender") not in ("M", "F")]
         if missing:
             return jsonify({
