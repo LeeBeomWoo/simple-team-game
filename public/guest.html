@@ -50,10 +50,12 @@
   .reveal .label{ font-size:14px; color:#9AA4B8; margin-bottom:10px; }
   .reveal .number{ font-family:'Fraunces', serif; font-weight:700; font-size:88px; color:var(--gold); line-height:1; }
   .reveal .partner{ font-family:'Fraunces', serif; font-weight:600; font-size:26px; color:var(--paper); margin-top:10px; }
+  #leaveBtn{ display:none; position:fixed; top:12px; right:12px; z-index:10; padding:8px 14px; border-radius:20px; border:1px solid var(--line); background:var(--navy-deep); color:#C9D0DE; font-size:13px; font-family:inherit; cursor:pointer; }
   .reveal .unmatched{ font-size:16px; color:var(--rose); margin-top:6px; }
 </style>
 </head>
 <body>
+<button id="leaveBtn">나가기</button>
 <main>
   <p class="eyebrow">GUEST</p>
   <h1 id="pageTitle">방 코드를 입력하세요</h1>
@@ -205,8 +207,30 @@ document.getElementById('joinBtn').addEventListener('click', async () => {
   }
 });
 
+
+// ---- 나가기 (어느 화면에서든) ----
+document.getElementById('leaveBtn').addEventListener('click', async () => {
+  if(!confirm('방에서 나갈까요?')) return;
+  const pid = participantId, sec = joinSecret;
+  clearGuestSession();
+  try{
+    if(pid && sec){
+      await fetch('/api/leave_room', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ participant_id: pid, join_secret: sec })
+      });
+    }
+  }catch(e){}
+  location.reload();
+});
+
+function showLeaveBtn(){
+  document.getElementById('leaveBtn').style.display = 'block';
+}
+
 // 서버 API(/api/my_result)로 3초마다 결과 확인 — Supabase 권한/Realtime 설정과 무관
 function startPolling(){
+  showLeaveBtn();
   if(pollTimer) clearInterval(pollTimer);
   checkResult();
   pollTimer = setInterval(checkResult, 3000);
