@@ -779,13 +779,17 @@ const Store = {
           `&host_token=${encodeURIComponent(saved.hostToken)}`
         );
 
-        if(res.status === 403 || res.status === 404){
+        const isJson = (res.headers.get('content-type') || '').includes('application/json');
+
+        // 서버가 JSON으로 "권한 없음/방 없음"이라고 답한 경우에만 방을 버림
+        // (라우팅 문제로 HTML 404가 오는 경우 등에는 저장된 방을 유지)
+        if((res.status === 403 || res.status === 404) && isJson){
           clearSession();
           document.getElementById('setupMsg').textContent = '이전 방이 종료되었어요.';
           return;
         }
 
-        if(res.ok){
+        if(res.ok && isJson){
           data = await res.json();
         }
       }catch(e){
@@ -907,10 +911,27 @@ const Store = {
         `/api/room_state?room_id=${encodeURIComponent(roomId)}` +
         `&host_token=${encodeURIComponent(hostToken)}`
       );
-      if(!res.ok){ return null; }
-      return await res.json();
+      const isJson = (res.headers.get('content-type') || '').includes('application/json');
+      if(res.ok && isJson){ return await res.json(); }
     }catch(e){
       console.warn('방 상태 조회 실패:', e);
+    }
+
+    // 서버 API를 못 쓸 때의 대체 경로: Supabase 직접 조회
+    if(!sb){ return null; }
+    try{
+      const { data: participants } = await sb
+        .from('participants').select('*').eq('room_id', roomId);
+      const { data: results } = await sb
+        .from('draw_results').select('*').eq('room_id', roomId);
+      const rounds = (results || []).map(r => r.round_no);
+      const current = rounds.length ? Math.max(...rounds) : 0;
+      return {
+        mode, gender_split: roomGenderSplit, current_round: current,
+        participants: participants || [],
+        results: (results || []).filter(r => r.round_no === current)
+      };
+    }catch(e){
       return null;
     }
   }
