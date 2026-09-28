@@ -94,6 +94,36 @@
 
 <script>
 let sb, participantId, joinSecret, roomMode, needsGender = false, gender = null, pollTimer = null, lastShownKey = null;
+
+// 저장소가 막힌 브라우저(인앱/시크릿 등)도 버티도록 여러 곳에 저장
+const Store = {
+  set(key, obj){
+    const v = JSON.stringify(obj);
+    try{ localStorage.setItem(key, v); }catch(e){}
+    try{ sessionStorage.setItem(key, v); }catch(e){}
+    try{ document.cookie = key + '=' + encodeURIComponent(v) + '; path=/; max-age=86400; SameSite=Lax'; }catch(e){}
+    try{ window.name = key + '::' + v; }catch(e){}
+  },
+  get(key){
+    try{ const v = localStorage.getItem(key); if(v) return JSON.parse(v); }catch(e){}
+    try{ const v = sessionStorage.getItem(key); if(v) return JSON.parse(v); }catch(e){}
+    try{
+      const m = document.cookie.split('; ').find(c => c.startsWith(key + '='));
+      if(m) return JSON.parse(decodeURIComponent(m.slice(key.length + 1)));
+    }catch(e){}
+    try{
+      if(window.name.startsWith(key + '::')) return JSON.parse(window.name.slice(key.length + 2));
+    }catch(e){}
+    return null;
+  },
+  del(key){
+    try{ localStorage.removeItem(key); }catch(e){}
+    try{ sessionStorage.removeItem(key); }catch(e){}
+    try{ document.cookie = key + '=; path=/; max-age=0'; }catch(e){}
+    try{ if(window.name.startsWith(key + '::')) window.name = ''; }catch(e){}
+  }
+};
+
 const GUEST_KEY = 'guestSession';
 
 function escapeHtmlGuest(str){
@@ -164,11 +194,10 @@ document.getElementById('joinBtn').addEventListener('click', async () => {
     if(!res.ok) throw new Error(data.error || '참가하지 못했어요.');
     participantId = data.participant_id;
     joinSecret = data.join_secret;
-    try{ localStorage.setItem(GUEST_KEY, JSON.stringify({ participantId, joinSecret, code: window.__code, name })); }catch(e){}
+    Store.set(GUEST_KEY, { participantId, joinSecret, code: window.__code, name });
     document.getElementById('whoAmI').textContent = `${name}님, 참가 완료`;
     document.getElementById('joinStep').style.display = 'none';
     document.getElementById('waitBox').style.display = 'block';
-    subscribeResult();
     startPolling();
   }catch(err){
     document.getElementById('joinMsg').textContent = err.message;
@@ -176,48 +205,7 @@ document.getElementById('joinBtn').addEventListener('click', async () => {
   }
 });
 
-function subscribeResult(){
-  sb.channel(`participant-${participantId}`)
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'draw_results', filter: `participant_id=eq.${participantId}` },
-      () => checkResult())
-    .subscribe();
-}
-
-async function showResult(row){
-  // 호스트가 결과 발표 사이에 형태(제비뽑기/커플매칭)를 바꿨을 수 있으니
-  // 참가 시점에 저장해둔 값 대신 최신 모드를 다시 확인한다.
-  try{
-    const infoRes = await fetch(`/api/room_info?code=${encodeURIComponent(window.__code)}`);
-    const info = await infoRes.json();
-    if(infoRes.ok) roomMode = info.mode;
-  }catch(e){}
-
-  document.getElementById('waitBox').style.display = 'none';
-  document.getElementById('revealBox').style.display = 'block';
-  const body = document.getElementById('revealBody');
-
-  if(roomMode === 'draw'){
-    if(!row.assigned_number){
-      document.getElementById('revealLabel').textContent = `${row.round_no}라운드`;
-      body.innerHTML = `<div class="unmatched">성별 정보가 없어 이번 라운드는 번호를 받지 못했어요.</div>`;
-      return;
-    }
-    document.getElementById('revealLabel').textContent = '당신의 번호는';
-    body.innerHTML = `<div class="number">${row.assigned_number}</div>${row.role_label ? `<div class="partner">${escapeHtmlGuest(row.role_label)}</div>` : ''}`;
-    return;
-  }
-
-  if(!row.partner_id){
-    document.getElementById('revealLabel').textContent = `${row.round_no}라운드`;
-    body.innerHTML = `<div class="unmatched">이번 라운드는 짝이 없어요.<br/>다음 라운드를 기다려주세요.</div>`;
-  }else{
-    const { data: partner } = await sb.from('participants').select('name').eq('id', row.partner_id).single();
-    document.getElementById('revealLabel').textContent = `${row.round_no}라운드 · 당신의 커플 번호는`;
-    body.innerHTML = `<div class="number">${row.assigned_number}</div><div class="partner">${(partner && partner.name) || '?'} 님과 매칭</div>`;
-  }
-}
-
-// Realtime이 안 오는 경우를 대비해 서버에서 직접 결과를 주기적으로 확인
+// 서버 API(/api/my_result)로 3초마다 결과 확인 — Supabase 권한/Realtime 설정과 무관
 function startPolling(){
   if(pollTimer) clearInterval(pollTimer);
   checkResult();
@@ -225,7 +213,7 @@ function startPolling(){
 }
 
 function clearGuestSession(){
-  try{ localStorage.removeItem(GUEST_KEY); }catch(e){}
+  Store.del(GUEST_KEY);
   if(pollTimer){ clearInterval(pollTimer); pollTimer = null; }
 }
 
@@ -286,8 +274,7 @@ function renderResult(d){
 
 // 새로고침해도 참가 상태 유지
 async function restoreGuest(){
-  let saved = null;
-  try{ saved = JSON.parse(localStorage.getItem(GUEST_KEY) || 'null'); }catch(e){}
+  const saved = Store.get(GUEST_KEY);
   if(!saved || !saved.participantId || !saved.joinSecret) return;
   participantId = saved.participantId;
   joinSecret = saved.joinSecret;
@@ -296,7 +283,6 @@ async function restoreGuest(){
   document.getElementById('codeStep').style.display = 'none';
   document.getElementById('joinStep').style.display = 'none';
   document.getElementById('waitBox').style.display = 'block';
-  subscribeResult();
   startPolling();
 }
 
