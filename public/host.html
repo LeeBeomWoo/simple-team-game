@@ -627,6 +627,19 @@
 
 
     <!-- =================================================
+         수동 동기화
+         ================================================= -->
+
+    <button
+      id="syncBtn"
+      class="secondary"
+      style="margin-top:10px;"
+    >
+      🔄 동기화
+    </button>
+
+
+    <!-- =================================================
          새 방
          ================================================= -->
 
@@ -817,7 +830,13 @@ const Store = {
       if(mode === 'draw'){
         document.getElementById('rolesEditor').style.display = 'block';
         document.getElementById('roleRows').innerHTML = '';
-        addRoleRow();
+        const saved = data.number_roles || {};
+        const keys = Object.keys(saved).sort((a,b) => Number(a) - Number(b));
+        if(keys.length){
+          keys.forEach(k => addRoleRow(k, saved[k]));
+        }else{
+          addRoleRow();
+        }
       }
 
       try{ await subscribeRoom(); }catch(e){ console.warn('구독 실패:', e); }
@@ -937,22 +956,76 @@ const Store = {
   }
 
 
+  let syncing = false;
+
+  // 화면의 번호/문구 입력칸을 서버에 저장 (뽑기 시작 전에 자동 호출)
+  async function pushRoles(){
+
+    const roles = {};
+
+    document.querySelectorAll('#roleRows .role-row').forEach(row => {
+      const num = row.querySelector('.role-num').value.trim();
+      const text = row.querySelector('.role-text').value.trim();
+      if(num && text){ roles[num] = text; }
+    });
+
+    const res = await fetch('/api/set_roles', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_id: roomId, host_token: hostToken, roles })
+    });
+
+    if(!res.ok){
+      const d = await res.json().catch(() => ({}));
+      throw new Error(d.error || '번호 문구를 저장하지 못했어요.');
+    }
+
+  }
+
+
+
+  // 서버에서 방 상태를 한 번만 가져와 참가자/결과를 함께 그린다 (덮어쓰기 경쟁 방지)
+  async function syncRoom(){
+
+    if(!roomId || syncing){
+      return false;
+    }
+
+    syncing = true;
+
+    try{
+
+      const state = await fetchRoomState();
+
+      if(!state){
+        return false;
+      }
+
+      const hasResults =
+        state.current_round > 0
+        &&
+        (state.results || []).length > 0;
+
+      if(hasResults){
+        await refreshRoundResults(state);
+      }else{
+        renderParticipants(
+          state.participants || []
+        );
+      }
+
+      return true;
+
+    }finally{
+
+      syncing = false;
+
+    }
+
+  }
+
   async function refreshParticipants(){
-
-    if(!roomId){
-      return;
-    }
-
-    const state = await fetchRoomState();
-
-    if(!state){
-      return;
-    }
-
-    renderParticipants(
-      state.participants || []
-    );
-
+    return syncRoom();
   }
 
 
@@ -1030,29 +1103,14 @@ const Store = {
   // 라운드 결과
   // =====================================================
 
-  async function refreshRoundResults(){
+  async function refreshRoundResults(stateArg){
 
-    if(!sb || !roomId || !roomCode){
+    if(!roomId){
       return;
     }
 
 
-    const res =
-      await fetch(
-        `/api/room_info?code=${encodeURIComponent(roomCode)}`
-      );
-
-
-    const info =
-      await res.json();
-
-
-    if(!res.ok){
-      return;
-    }
-
-
-    const state = await fetchRoomState();
+    const state = stateArg || await fetchRoomState();
 
     if(!state){
       return;
@@ -1412,8 +1470,7 @@ const Store = {
     }
     window.__participantPoll = setInterval(() => {
       if(roomId && !document.hidden){
-        refreshParticipants();
-        refreshRoundResults();
+        syncRoom();
       }
     }, 3000);
 
@@ -1642,6 +1699,10 @@ const Store = {
 
 
         try{
+
+          if(mode === 'draw'){
+            await pushRoles();
+          }
 
           const res =
             await fetch(
@@ -2198,6 +2259,30 @@ const Store = {
 
       }
     );
+
+
+  // =====================================================
+  // 수동 동기화 버튼
+  // =====================================================
+
+  document
+    .getElementById('syncBtn')
+    .addEventListener('click', async () => {
+
+      const btn = document.getElementById('syncBtn');
+      btn.disabled = true;
+      btn.textContent = '동기화 중...';
+
+      const ok = await syncRoom();
+
+      btn.textContent = ok ? '✅ 동기화 완료' : '⚠️ 동기화 실패 (다시 눌러주세요)';
+
+      setTimeout(() => {
+        btn.textContent = '🔄 동기화';
+        btn.disabled = false;
+      }, 1500);
+
+    });
 
 
   // =====================================================
