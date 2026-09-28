@@ -703,10 +703,14 @@
 
     const cfg = await res.json();
 
-    sb = window.supabase.createClient(
-      cfg.supabaseUrl,
-      cfg.supabaseAnonKey
-    );
+    try{
+      sb = window.supabase.createClient(
+        cfg.supabaseUrl,
+        cfg.supabaseAnonKey
+      );
+    }catch(e){
+      console.warn('Supabase 초기화 실패(서버 API로만 동작):', e);
+    }
 
     await restoreSession();
 
@@ -812,9 +816,9 @@ const Store = {
         addRoleRow();
       }
 
-      await subscribeRoom();
+      try{ await subscribeRoom(); }catch(e){ console.warn('구독 실패:', e); }
       await refreshParticipants();
-      await refreshRoundResults();
+      try{ await refreshRoundResults(); }catch(e){ console.warn('결과 조회 실패:', e); }
 
     }catch(e){
       console.warn('방 복원 실패:', e);
