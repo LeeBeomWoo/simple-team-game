@@ -211,6 +211,48 @@ def my_result():
     })
 
 
+@app.route("/api/leave_room", methods=["POST"])
+def leave_room():
+    data = request.get_json(force=True, silent=True) or {}
+    participant_id = data.get("participant_id")
+    join_secret = data.get("join_secret")
+    if not participant_id or not join_secret:
+        return jsonify({"error": "잘못된 요청이에요."}), 400
+
+    resp = requests.get(
+        sb_url("participants"),
+        headers=sb_headers(),
+        params={"id": f"eq.{participant_id}", "select": "id,room_id,join_secret"},
+        timeout=10,
+    )
+    rows = resp.json()
+    if not rows or rows[0]["join_secret"] != join_secret:
+        return jsonify({"error": "권한이 없어요."}), 403
+
+    # 다른 사람 결과의 partner_id가 이 참가자를 가리키고 있으면 삭제가 막힐 수 있어 미리 비움
+    try:
+        requests.patch(
+            sb_url("draw_results"),
+            headers=sb_headers(),
+            params={"partner_id": f"eq.{participant_id}"},
+            json={"partner_id": None},
+            timeout=10,
+        )
+    except Exception as e:
+        print(f"[leave_room partner 정리 실패] {e}")
+
+    resp = requests.delete(
+        sb_url("participants"),
+        headers=sb_headers(),
+        params={"id": f"eq.{participant_id}"},
+        timeout=10,
+    )
+    if resp.status_code not in (200, 204):
+        return jsonify({"error": resp.text}), 500
+    touch_room(rows[0]["room_id"])
+    return jsonify({"ok": True})
+
+
 @app.route("/api/set_roles", methods=["POST"])
 def set_roles():
     data = request.get_json(force=True, silent=True) or {}
