@@ -373,6 +373,7 @@ def room_state():
     return jsonify({
         "mode": room["mode"], "status": room["status"], "current_round": room["current_round"],
         "gender_split": room["gender_split"],
+        "number_roles": room.get("number_roles") or {},
         "participants": participants,
         "results": results,
     })
