@@ -708,6 +708,86 @@
       cfg.supabaseAnonKey
     );
 
+    await restoreSession();
+
+  }
+
+
+  // =====================================================
+  // 새로고침해도 방 유지 (세션 저장/복원)
+  // =====================================================
+
+  const SESSION_KEY = 'hostRoomSession';
+
+  function saveSession(){
+    try{
+      localStorage.setItem(SESSION_KEY, JSON.stringify({
+        roomId, roomCode, hostToken, mode, roomGenderSplit
+      }));
+    }catch(e){}
+  }
+
+  function clearSession(){
+    try{ localStorage.removeItem(SESSION_KEY); }catch(e){}
+  }
+
+  async function restoreSession(){
+
+    let saved = null;
+    try{
+      saved = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
+    }catch(e){}
+
+    if(!saved || !saved.roomId || !saved.hostToken){
+      return;
+    }
+
+    try{
+
+      const res = await fetch(
+        `/api/room_state?room_id=${encodeURIComponent(saved.roomId)}` +
+        `&host_token=${encodeURIComponent(saved.hostToken)}`
+      );
+
+      if(!res.ok){
+        clearSession();
+        return;
+      }
+
+      const data = await res.json();
+
+      roomId = saved.roomId;
+      roomCode = saved.roomCode;
+      hostToken = saved.hostToken;
+      mode = data.mode;
+      roomGenderSplit = data.gender_split;
+
+      document.getElementById('roomCode').textContent = roomCode;
+
+      document.getElementById('drawBtn').textContent =
+        mode === 'couple' ? '매칭 시작' : '뽑기 시작';
+
+      document.getElementById('setup').style.display = 'none';
+      document.getElementById('room').style.display = 'block';
+
+      document.getElementById('hostGenderField').style.display =
+        (mode === 'couple' || (mode === 'draw' && roomGenderSplit))
+          ? 'flex' : 'none';
+
+      if(mode === 'draw'){
+        document.getElementById('rolesEditor').style.display = 'block';
+        document.getElementById('roleRows').innerHTML = '';
+        addRoleRow();
+      }
+
+      await subscribeRoom();
+      await refreshParticipants();
+      await refreshRoundResults();
+
+    }catch(e){
+      console.warn('방 복원 실패:', e);
+    }
+
   }
 
 
@@ -1286,7 +1366,19 @@
             refreshRoundResults()
         )
 
-        .subscribe();
+        .subscribe((status) => {
+          console.log('realtime 상태:', status);
+        });
+
+    // Realtime이 안 올 때(테이블 Realtime 미활성/연결 끊김 등)를 대비한 폴링 보조
+    if(window.__participantPoll){
+      clearInterval(window.__participantPoll);
+    }
+    window.__participantPoll = setInterval(() => {
+      if(roomId && !document.hidden){
+        refreshParticipants();
+      }
+    }, 3000);
 
   }
 
@@ -1456,6 +1548,8 @@
 
           }
 
+
+          saveSession();
 
           await subscribeRoom();
 
@@ -1848,6 +1942,8 @@
         }
 
 
+        clearSession();
+
         location.reload();
 
       }
@@ -2132,6 +2228,7 @@
 
           mode = data.mode;
           roomGenderSplit = data.gender_split;
+          saveSession();
 
           document.getElementById('drawBtn').textContent =
             mode === 'couple' ? '매칭 시작' : '뽑기 시작';
@@ -2300,6 +2397,8 @@
           // ---------------------------------------------
           // 현재 방 정보 초기화
           // ---------------------------------------------
+
+          clearSession();
 
           roomId = null;
           roomCode = null;

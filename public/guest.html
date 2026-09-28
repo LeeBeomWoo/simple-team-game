@@ -93,7 +93,8 @@
 </main>
 
 <script>
-let sb, participantId, roomMode, needsGender = false, gender = null;
+let sb, participantId, joinSecret, roomMode, needsGender = false, gender = null, pollTimer = null, lastShownKey = null;
+const GUEST_KEY = 'guestSession';
 
 function escapeHtmlGuest(str){
   return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -162,10 +163,13 @@ document.getElementById('joinBtn').addEventListener('click', async () => {
     const data = await res.json();
     if(!res.ok) throw new Error(data.error || '참가하지 못했어요.');
     participantId = data.participant_id;
+    joinSecret = data.join_secret;
+    try{ localStorage.setItem(GUEST_KEY, JSON.stringify({ participantId, joinSecret, code: window.__code, name })); }catch(e){}
     document.getElementById('whoAmI').textContent = `${name}님, 참가 완료`;
     document.getElementById('joinStep').style.display = 'none';
     document.getElementById('waitBox').style.display = 'block';
     subscribeResult();
+    startPolling();
   }catch(err){
     document.getElementById('joinMsg').textContent = err.message;
     btn.disabled = false;
@@ -175,7 +179,7 @@ document.getElementById('joinBtn').addEventListener('click', async () => {
 function subscribeResult(){
   sb.channel(`participant-${participantId}`)
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'draw_results', filter: `participant_id=eq.${participantId}` },
-      async (payload) => showResult(payload.new))
+      () => checkResult())
     .subscribe();
 }
 
@@ -213,7 +217,90 @@ async function showResult(row){
   }
 }
 
-loadConfig();
+// Realtime이 안 오는 경우를 대비해 서버에서 직접 결과를 주기적으로 확인
+function startPolling(){
+  if(pollTimer) clearInterval(pollTimer);
+  checkResult();
+  pollTimer = setInterval(checkResult, 3000);
+}
+
+function clearGuestSession(){
+  try{ localStorage.removeItem(GUEST_KEY); }catch(e){}
+  if(pollTimer){ clearInterval(pollTimer); pollTimer = null; }
+}
+
+async function checkResult(){
+  if(!participantId || !joinSecret || document.hidden) return;
+  try{
+    const res = await fetch(`/api/my_result?participant_id=${encodeURIComponent(participantId)}&join_secret=${encodeURIComponent(joinSecret)}`);
+    if(res.status === 403 || res.status === 404){
+      // 방이 삭제됐거나 참가 정보가 사라짐
+      clearGuestSession();
+      alert('방이 종료되었거나 참가 정보를 찾을 수 없어요.');
+      location.reload();
+      return;
+    }
+    if(!res.ok) return;
+    const data = await res.json();
+    roomMode = data.mode;
+    if(data.waiting){
+      // 결과가 없거나 호스트가 초기화/형태 변경한 경우 대기 화면으로
+      if(lastShownKey !== null){
+        lastShownKey = null;
+        document.getElementById('revealBox').style.display = 'none';
+        document.getElementById('waitBox').style.display = 'block';
+      }
+      return;
+    }
+    const key = `${data.mode}:${data.round_no}:${data.assigned_number}:${data.partner_name}`;
+    if(key === lastShownKey) return;
+    lastShownKey = key;
+    renderResult(data);
+  }catch(e){
+    console.warn('결과 확인 실패:', e);
+  }
+}
+
+function renderResult(d){
+  document.getElementById('waitBox').style.display = 'none';
+  document.getElementById('revealBox').style.display = 'block';
+  const body = document.getElementById('revealBody');
+  if(d.mode === 'draw'){
+    if(!d.assigned_number){
+      document.getElementById('revealLabel').textContent = `${d.round_no}라운드`;
+      body.innerHTML = `<div class="unmatched">성별 정보가 없어 이번 라운드는 번호를 받지 못했어요.</div>`;
+      return;
+    }
+    document.getElementById('revealLabel').textContent = '당신의 번호는';
+    body.innerHTML = `<div class="number">${d.assigned_number}</div>${d.role_label ? `<div class="partner">${escapeHtmlGuest(d.role_label)}</div>` : ''}`;
+    return;
+  }
+  if(!d.partner_name){
+    document.getElementById('revealLabel').textContent = `${d.round_no}라운드`;
+    body.innerHTML = `<div class="unmatched">이번 라운드는 짝이 없어요.<br/>다음 라운드를 기다려주세요.</div>`;
+  }else{
+    document.getElementById('revealLabel').textContent = `${d.round_no}라운드 · 당신의 커플 번호는`;
+    body.innerHTML = `<div class="number">${d.assigned_number}</div><div class="partner">${escapeHtmlGuest(d.partner_name)} 님과 매칭</div>`;
+  }
+}
+
+// 새로고침해도 참가 상태 유지
+async function restoreGuest(){
+  let saved = null;
+  try{ saved = JSON.parse(localStorage.getItem(GUEST_KEY) || 'null'); }catch(e){}
+  if(!saved || !saved.participantId || !saved.joinSecret) return;
+  participantId = saved.participantId;
+  joinSecret = saved.joinSecret;
+  window.__code = saved.code;
+  document.getElementById('whoAmI').textContent = `${saved.name}님, 참가 완료`;
+  document.getElementById('codeStep').style.display = 'none';
+  document.getElementById('joinStep').style.display = 'none';
+  document.getElementById('waitBox').style.display = 'block';
+  subscribeResult();
+  startPolling();
+}
+
+loadConfig().then(restoreGuest);
 </script>
 </body>
 </html>
