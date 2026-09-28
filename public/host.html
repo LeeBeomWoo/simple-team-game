@@ -717,26 +717,49 @@
   // 새로고침해도 방 유지 (세션 저장/복원)
   // =====================================================
 
+
+// 저장소가 막힌 브라우저(인앱/시크릿 등)도 버티도록 여러 곳에 저장
+const Store = {
+  set(key, obj){
+    const v = JSON.stringify(obj);
+    try{ localStorage.setItem(key, v); }catch(e){}
+    try{ sessionStorage.setItem(key, v); }catch(e){}
+    try{ document.cookie = key + '=' + encodeURIComponent(v) + '; path=/; max-age=86400; SameSite=Lax'; }catch(e){}
+    try{ window.name = key + '::' + v; }catch(e){}
+  },
+  get(key){
+    try{ const v = localStorage.getItem(key); if(v) return JSON.parse(v); }catch(e){}
+    try{ const v = sessionStorage.getItem(key); if(v) return JSON.parse(v); }catch(e){}
+    try{
+      const m = document.cookie.split('; ').find(c => c.startsWith(key + '='));
+      if(m) return JSON.parse(decodeURIComponent(m.slice(key.length + 1)));
+    }catch(e){}
+    try{
+      if(window.name.startsWith(key + '::')) return JSON.parse(window.name.slice(key.length + 2));
+    }catch(e){}
+    return null;
+  },
+  del(key){
+    try{ localStorage.removeItem(key); }catch(e){}
+    try{ sessionStorage.removeItem(key); }catch(e){}
+    try{ document.cookie = key + '=; path=/; max-age=0'; }catch(e){}
+    try{ if(window.name.startsWith(key + '::')) window.name = ''; }catch(e){}
+  }
+};
+
   const SESSION_KEY = 'hostRoomSession';
 
   function saveSession(){
-    try{
-      localStorage.setItem(SESSION_KEY, JSON.stringify({
-        roomId, roomCode, hostToken, mode, roomGenderSplit
-      }));
-    }catch(e){}
+    Store.set(SESSION_KEY, { roomId, roomCode, hostToken, mode, roomGenderSplit });
   }
 
   function clearSession(){
-    try{ localStorage.removeItem(SESSION_KEY); }catch(e){}
+    Store.del(SESSION_KEY);
   }
 
   async function restoreSession(){
 
-    let saved = null;
-    try{
-      saved = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
-    }catch(e){}
+    const saved = Store.get(SESSION_KEY);
 
     if(!saved || !saved.roomId || !saved.hostToken){
       return;
@@ -744,17 +767,26 @@
 
     try{
 
-      const res = await fetch(
-        `/api/room_state?room_id=${encodeURIComponent(saved.roomId)}` +
-        `&host_token=${encodeURIComponent(saved.hostToken)}`
-      );
+      let data = { mode: saved.mode, gender_split: saved.roomGenderSplit };
 
-      if(!res.ok){
-        clearSession();
-        return;
+      try{
+        const res = await fetch(
+          `/api/room_state?room_id=${encodeURIComponent(saved.roomId)}` +
+          `&host_token=${encodeURIComponent(saved.hostToken)}`
+        );
+
+        if(res.status === 403 || res.status === 404){
+          clearSession();
+          document.getElementById('setupMsg').textContent = '이전 방이 종료되었어요.';
+          return;
+        }
+
+        if(res.ok){
+          data = await res.json();
+        }
+      }catch(e){
+        // 네트워크/서버 오류여도 저장된 정보로 복원 시도
       }
-
-      const data = await res.json();
 
       roomId = saved.roomId;
       roomCode = saved.roomCode;
@@ -863,32 +895,37 @@
   // 참가자 새로고침
   // =====================================================
 
+  // 서버(API, service key)를 통해 방 상태 조회 — Supabase RLS/Realtime 설정과 무관하게 동작
+  async function fetchRoomState(){
+    if(!roomId || !hostToken){ return null; }
+    try{
+      const res = await fetch(
+        `/api/room_state?room_id=${encodeURIComponent(roomId)}` +
+        `&host_token=${encodeURIComponent(hostToken)}`
+      );
+      if(!res.ok){ return null; }
+      return await res.json();
+    }catch(e){
+      console.warn('방 상태 조회 실패:', e);
+      return null;
+    }
+  }
+
+
   async function refreshParticipants(){
 
-    if(!sb || !roomId){
+    if(!roomId){
       return;
     }
 
-    const {
-      data,
-      error
-    } = await sb
-      .from('participants')
-      .select('*')
-      .eq('room_id', roomId);
+    const state = await fetchRoomState();
 
-    if(error){
-
-      console.error(
-        '참가자 조회 오류:',
-        error
-      );
-
+    if(!state){
       return;
     }
 
     renderParticipants(
-      data || []
+      state.participants || []
     );
 
   }
@@ -990,24 +1027,15 @@
     }
 
 
-    const {
-      data: results,
-      error: resultsError
-    } = await sb
-      .from('draw_results')
-      .select('*')
-      .eq('room_id', roomId);
+    const state = await fetchRoomState();
 
-
-    if(resultsError){
-
-      console.error(
-        '결과 조회 오류:',
-        resultsError
-      );
-
+    if(!state){
       return;
     }
+
+    const results = (state.results || []).map(
+      r => ({ ...r, round_no: state.current_round })
+    );
 
 
     if(!results || results.length === 0){
@@ -1040,24 +1068,7 @@
         `${latestRound}라운드 결과`;
 
 
-    const {
-      data: participants,
-      error: participantsError
-    } = await sb
-      .from('participants')
-      .select('*')
-      .eq('room_id', roomId);
-
-
-    if(participantsError){
-
-      console.error(
-        '참가자 결과 조회 오류:',
-        participantsError
-      );
-
-      return;
-    }
+    const participants = state.participants || [];
 
 
     const nameOf =
@@ -1377,6 +1388,7 @@
     window.__participantPoll = setInterval(() => {
       if(roomId && !document.hidden){
         refreshParticipants();
+        refreshRoundResults();
       }
     }, 3000);
 
