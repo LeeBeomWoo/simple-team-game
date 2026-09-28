@@ -286,7 +286,8 @@ async function restoreGuest(){
   startPolling();
 }
 
-loadConfig().then(restoreGuest);
+try{ loadConfig().catch(()=>{}); }catch(e){}
+restoreGuest();
 </script>
 </body>
 </html>
