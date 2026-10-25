@@ -1,3 +1,4 @@
+import hmac
 import os
 import random
 import string
@@ -16,6 +17,10 @@ CRON_SECRET = os.environ.get("CRON_SECRET", "")
 # 마지막 활동 후 이 시간(시간 단위)이 지난 방은 /api/cleanup 호출 시 자동 삭제됩니다.
 # 예) ROOM_INACTIVE_HOURS=48 → 48시간 미사용 방 삭제, 168 → 7일
 ROOM_INACTIVE_HOURS = int(os.environ.get("ROOM_INACTIVE_HOURS", "24"))
+
+# 방당 최대 참가자 수 / 동시에 존재할 수 있는 최대 방 수 (환경변수로 조정 가능)
+MAX_PARTICIPANTS_PER_ROOM = int(os.environ.get("MAX_PARTICIPANTS_PER_ROOM", "100"))
+MAX_ACTIVE_ROOMS = int(os.environ.get("MAX_ACTIVE_ROOMS", "300"))
 
 CODE_ALPHABET = "".join(c for c in string.ascii_uppercase if c not in "OI") + "23456789"
 VALID_MODES = {"draw", "couple"}
@@ -43,6 +48,40 @@ def sb_url(path):
     return f"{SUPABASE_URL}/rest/v1/{path}"
 
 
+def safe_eq(a, b):
+    """타이밍 공격을 피하는 문자열 비교. 문자열이 아니면 불일치로 처리."""
+    if not isinstance(a, str) or not isinstance(b, str):
+        return False
+    return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
+
+
+def as_str(value):
+    """JSON 값이 문자열이 아니어도 예외 없이 빈 문자열로 처리."""
+    return value.strip() if isinstance(value, str) else ""
+
+
+def db_error(resp, status=500):
+    """Supabase 원문 에러는 서버 로그에만 남기고 클라이언트에는 일반 메시지만 반환."""
+    print(f"[DB 오류] {resp.status_code} {resp.text[:500]}")
+    return jsonify({"error": "서버 처리 중 오류가 발생했어요. 잠시 후 다시 시도해주세요."}), status
+
+
+def count_rows(table, params):
+    """조건에 맞는 행 개수를 반환 (실패 시 None)."""
+    try:
+        headers = sb_headers()
+        headers["Prefer"] = "count=exact"
+        headers["Range"] = "0-0"
+        p = dict(params)
+        p["select"] = "id"
+        resp = requests.get(sb_url(table), headers=headers, params=p, timeout=10)
+        total = resp.headers.get("Content-Range", "").split("/")[-1]
+        return int(total) if total.isdigit() else None
+    except Exception as e:
+        print(f"[count_rows 실패] {table} / {e}")
+        return None
+
+
 def gen_code(n=5):
     return "".join(secrets.choice(CODE_ALPHABET) for _ in range(n))
 
@@ -57,6 +96,9 @@ def get_room(room_id=None, code=None):
     else:
         params["code"] = f"eq.{code}"
     resp = requests.get(sb_url("rooms"), headers=sb_headers(), params=params, timeout=10)
+    if resp.status_code != 200:
+        print(f"[get_room 실패] {resp.status_code} {resp.text[:300]}")
+        return None
     rows = resp.json()
     return rows[0] if rows else None
 
@@ -78,7 +120,7 @@ def touch_room(room_id):
 
 @app.route("/api/room_info", methods=["GET"])
 def room_info():
-    code = (request.args.get("code") or "").strip().upper()
+    code = as_str(request.args.get("code")).upper()
     if not code:
         return jsonify({"error": "코드를 입력해주세요."}), 400
     room = get_room(code=code)
@@ -93,12 +135,16 @@ def room_info():
 @app.route("/api/create_room", methods=["POST"])
 def create_room():
     data = request.get_json(force=True, silent=True) or {}
-    title = (data.get("title") or "").strip()[:60]
+    title = as_str(data.get("title"))[:60]
     mode = data.get("mode") if data.get("mode") in VALID_MODES else "draw"
     gender_split = bool(data.get("gender_split")) and mode == "draw"
     if not title:
         title = "커플매칭" if mode == "couple" else "제비뽑기"
     host_token = secrets.token_urlsafe(16)
+
+    room_count = count_rows("rooms", {})
+    if room_count is not None and room_count >= MAX_ACTIVE_ROOMS:
+        return jsonify({"error": "지금은 새 방을 만들 수 없어요. 잠시 후 다시 시도해주세요."}), 429
 
     for _ in range(5):
         code = gen_code()
@@ -118,15 +164,15 @@ def create_room():
                 "mode": mode, "gender_split": gender_split,
             })
         if resp.status_code != 409:
-            return jsonify({"error": resp.text}), 500
+            return db_error(resp)
     return jsonify({"error": "방 코드를 생성하지 못했어요. 다시 시도해주세요."}), 500
 
 
 @app.route("/api/join", methods=["POST"])
 def join_room():
     data = request.get_json(force=True, silent=True) or {}
-    code = (data.get("code") or "").strip().upper()
-    name = (data.get("name") or "").strip()[:30]
+    code = as_str(data.get("code")).upper()
+    name = as_str(data.get("name"))[:30]
     gender = data.get("gender")
     if not code or not name:
         return jsonify({"error": "코드와 이름을 입력해주세요."}), 400
@@ -136,6 +182,10 @@ def join_room():
         return jsonify({"error": "존재하지 않는 방 코드예요."}), 404
     if room["status"] != "waiting":
         return jsonify({"error": "이미 시작된 방이라 더 이상 참가할 수 없어요."}), 400
+
+    current = count_rows("participants", {"room_id": f"eq.{room['id']}"})
+    if current is not None and current >= MAX_PARTICIPANTS_PER_ROOM:
+        return jsonify({"error": f"방이 가득 찼어요. (최대 {MAX_PARTICIPANTS_PER_ROOM}명)"}), 400
 
     payload = {"room_id": room["id"], "name": name}
     needs_gender = room["mode"] == "couple" or (room["mode"] == "draw" and room["gender_split"])
@@ -150,7 +200,7 @@ def join_room():
 
     resp = requests.post(sb_url("participants"), headers=sb_headers(), json=payload, timeout=10)
     if resp.status_code != 201:
-        return jsonify({"error": resp.text}), 500
+        return db_error(resp)
     participant = resp.json()[0]
     touch_room(room["id"])
     return jsonify({
@@ -176,7 +226,7 @@ def my_result():
         timeout=10,
     )
     rows = resp.json()
-    if not rows or rows[0]["join_secret"] != join_secret:
+    if not rows or not safe_eq(rows[0]["join_secret"], join_secret):
         return jsonify({"error": "권한이 없어요."}), 403
     participant = rows[0]
 
@@ -248,7 +298,7 @@ def leave_room():
         timeout=10,
     )
     rows = resp.json()
-    if not rows or rows[0]["join_secret"] != join_secret:
+    if not rows or not safe_eq(rows[0]["join_secret"], join_secret):
         return jsonify({"error": "권한이 없어요."}), 403
 
     # 다른 사람 결과의 partner_id가 이 참가자를 가리키고 있으면 삭제가 막힐 수 있어 미리 비움
@@ -270,7 +320,7 @@ def leave_room():
         timeout=10,
     )
     if resp.status_code not in (200, 204):
-        return jsonify({"error": resp.text}), 500
+        return db_error(resp)
     touch_room(rows[0]["room_id"])
     return jsonify({"ok": True})
 
@@ -285,7 +335,7 @@ def set_roles():
         return jsonify({"error": "잘못된 요청이에요."}), 400
 
     room = get_room(room_id=room_id)
-    if not room or room["host_token"] != host_token:
+    if not room or not safe_eq(room["host_token"], host_token):
         return jsonify({"error": "권한이 없어요."}), 403
 
     cleaned = {}
@@ -294,7 +344,7 @@ def set_roles():
             num = int(key)
         except (TypeError, ValueError):
             continue
-        text = (value or "").strip()[:40]
+        text = as_str(value)[:40]
         if num > 0 and text:
             cleaned[str(num)] = text
         if len(cleaned) >= 300:
@@ -368,7 +418,7 @@ def room_state():
         return jsonify({"error": "잘못된 요청이에요."}), 400
 
     room = get_room(room_id=room_id)
-    if not room or room["host_token"] != host_token:
+    if not room or not safe_eq(room["host_token"], host_token):
         return jsonify({"error": "권한이 없어요."}), 403
 
     resp = requests.get(
@@ -426,7 +476,7 @@ def set_entitlements():
         return jsonify({"error": "변경할 참가자를 선택해주세요."}), 400
 
     room = get_room(room_id=room_id)
-    if not room or room["host_token"] != host_token:
+    if not room or not safe_eq(room["host_token"], host_token):
         return jsonify({"error": "권한이 없어요."}), 403
 
     select = "id,name,gender," + ",".join(ENTITLEMENT_FIELDS)
@@ -446,31 +496,38 @@ def set_entitlements():
             return jsonify({"error": "선택한 참가자 중 방에서 찾을 수 없는 사람이 있어요."}), 404
 
     required_gender = ENTITLEMENT_FIELDS[field]
-    updated = 0
-    skipped = []
+    plain_ids, gender_fix_ids, skipped = [], [], []
     for person in targets:
         gender = person.get("gender")
         if required_gender and count > 0 and gender not in (required_gender, None):
             skipped.append(person["name"])
             continue
-
-        updates = {field: count}
         if required_gender and count > 0 and gender is None:
             if apply_to_all:
                 skipped.append(person["name"])
                 continue
-            updates["gender"] = required_gender
+            gender_fix_ids.append(person["id"])
+            continue
+        plain_ids.append(person["id"])
 
+    updated = 0
+    batches = (
+        (plain_ids, {field: count}),
+        (gender_fix_ids, {field: count, "gender": required_gender}),
+    )
+    for ids, updates in batches:
+        if not ids:
+            continue
         resp = requests.patch(
             sb_url("participants"),
             headers=sb_headers(),
-            params={"id": f"eq.{person['id']}", "room_id": f"eq.{room_id}"},
+            params={"id": f"in.({','.join(ids)})", "room_id": f"eq.{room_id}"},
             json=updates,
-            timeout=10,
+            timeout=15,
         )
         if resp.status_code not in (200, 204):
-            return jsonify({"error": resp.text}), 500
-        updated += 1
+            return db_error(resp)
+        updated += len(ids)
 
     if updated:
         touch_room(room_id)
@@ -486,7 +543,7 @@ def start_round():
         return jsonify({"error": "잘못된 요청이에요."}), 400
 
     room = get_room(room_id=room_id)
-    if not room or room["host_token"] != host_token:
+    if not room or not safe_eq(room["host_token"], host_token):
         return jsonify({"error": "권한이 없어요."}), 403
 
     participants = fetch_participants(room_id)
@@ -562,16 +619,31 @@ def start_round():
             })
 
     resp = requests.post(sb_url("draw_results"), headers=sb_headers(), json=rows, timeout=15)
+    if resp.status_code == 409:
+        # (room_id, round_no, participant_id) 유니크 제약에 걸림 = 같은 라운드가 이미 시작됨
+        return jsonify({"error": "이미 이 라운드가 시작됐어요. 화면을 새로고침해주세요."}), 409
     if resp.status_code != 201:
-        return jsonify({"error": resp.text}), 500
+        return db_error(resp)
 
-    requests.patch(
+    resp = requests.patch(
         sb_url("rooms"),
         headers=sb_headers(),
         params={"id": f"eq.{room_id}"},
         json={"status": "active", "current_round": next_round},
         timeout=10,
     )
+    if resp.status_code not in (200, 204):
+        # 방 상태 갱신에 실패하면 방금 넣은 결과를 지워 일관성을 유지
+        try:
+            requests.delete(
+                sb_url("draw_results"),
+                headers=sb_headers(),
+                params={"room_id": f"eq.{room_id}", "round_no": f"eq.{next_round}"},
+                timeout=10,
+            )
+        except Exception as e:
+            print(f"[start_round 롤백 실패] {room_id} / {e}")
+        return db_error(resp)
     touch_room(room_id)
 
     result = {"ok": True, "round": next_round, "count": len(participants)}
@@ -592,7 +664,7 @@ def delete_room():
         return jsonify({"error": "잘못된 요청이에요."}), 400
 
     room = get_room(room_id=room_id)
-    if not room or room["host_token"] != host_token:
+    if not room or not safe_eq(room["host_token"], host_token):
         return jsonify({"error": "권한이 없어요."}), 403
 
     # participants/draw_results는 rooms에 대한 ON DELETE CASCADE로 함께 삭제됨.
@@ -603,7 +675,7 @@ def delete_room():
         timeout=10,
     )
     if resp.status_code not in (200, 204):
-        return jsonify({"error": resp.text}), 500
+        return db_error(resp)
     return jsonify({"ok": True})
 
 
@@ -622,7 +694,7 @@ def change_mode():
         return jsonify({"error": "잘못된 요청이에요."}), 400
 
     room = get_room(room_id=room_id)
-    if not room or room["host_token"] != host_token:
+    if not room or not safe_eq(room["host_token"], host_token):
         return jsonify({"error": "권한이 없어요."}), 403
 
     gender_split = gender_split and new_mode == "draw"
@@ -658,7 +730,7 @@ def change_mode():
         timeout=10,
     )
     if resp.status_code not in (200, 204):
-        return jsonify({"error": resp.text}), 500
+        return db_error(resp)
 
     touch_room(room_id)
     return jsonify({"ok": True, "mode": new_mode, "gender_split": gender_split})
@@ -684,6 +756,6 @@ def cleanup():
         timeout=20,
     )
     if resp.status_code not in (200, 204):
-        return jsonify({"error": resp.text}), 500
+        return db_error(resp)
     deleted = resp.json() if resp.text else []
     return jsonify({"ok": True, "deleted_count": len(deleted), "cutoff": cutoff})
