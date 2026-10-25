@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>현재 상태 화면</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pretendard@1.3.9/dist/web/static/pretendard.min.css" />
+<style>
+  :root{
+    --ink:#172B2A;
+    --ink-soft:#244341;
+    --mint:#A9D8C5;
+    --lime:#D8E878;
+    --paper:#F4F3E9;
+    --muted:#A7BBB2;
+    --line:rgba(244,243,233,.18);
+    --alert:#F0A39A;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;
+    min-height:100vh;
+    background-color:var(--ink);
+    background-image:radial-gradient(ellipse at 12% 0%,rgba(169,216,197,.14),transparent 48%),linear-gradient(135deg,transparent 65%,rgba(216,232,120,.035));
+    color:var(--paper);
+    font-family:'Pretendard',sans-serif;
+  }
+  main{width:min(100% - 48px,1440px);margin:0 auto;padding:clamp(28px,5vh,64px) 0}
+  header{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;border-bottom:1px solid var(--line);padding-bottom:24px}
+  .eyebrow{color:var(--lime);font-size:13px;font-weight:700;letter-spacing:0;margin:0 0 12px}
+  h1{font-family:'Fraunces','Pretendard',serif;font-size:clamp(30px,5vw,58px);font-weight:600;line-height:1.12;margin:0;overflow-wrap:anywhere}
+  .round{flex:none;text-align:right;color:var(--mint);font-size:clamp(16px,2vw,24px);font-weight:700;padding-top:8px}
+  .status{display:flex;align-items:center;gap:9px;color:var(--muted);font-size:14px;margin:20px 0 28px}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--lime);box-shadow:0 0 14px rgba(216,232,120,.55)}
+  .dot.error{background:var(--alert);box-shadow:none}
+  .content{min-height:48vh}
+  .message{color:var(--muted);font-size:clamp(18px,2.5vw,28px);padding:36px 0}
+  .message.error{color:var(--alert)}
+  .draw-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:12px}
+  .person,.couple{display:flex;align-items:center;justify-content:space-between;gap:20px;min-height:96px;padding:20px 24px;background:var(--ink-soft);border-left:3px solid var(--mint)}
+  .person-name{font-size:clamp(20px,2.7vw,32px);font-weight:650;overflow-wrap:anywhere}
+  .person-detail{flex:none;text-align:right;color:var(--lime);font-family:'Fraunces','Pretendard',serif;font-size:clamp(20px,2.6vw,30px);font-weight:600}
+  .role{display:block;color:var(--mint);font-family:'Pretendard',sans-serif;font-size:15px;font-weight:500;margin-top:4px}
+  .tag-badges{display:inline-flex;flex-wrap:wrap;gap:5px;margin-left:8px;vertical-align:middle}
+  .tag-badge{padding:3px 7px;border:1px solid rgba(216,232,120,.45);border-radius:5px;color:var(--lime);font-size:12px;font-weight:600;white-space:nowrap}
+  .couple-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:12px}
+  .couple{justify-content:flex-start;border-left-color:var(--lime);font-size:clamp(19px,2.5vw,30px);flex-wrap:wrap}
+  .couple-number{color:var(--lime);font-family:'Fraunces','Pretendard',serif;font-size:clamp(26px,3vw,38px);font-weight:700;min-width:42px}
+  .couple-names{overflow-wrap:anywhere}
+  .heart{color:#E99A89;margin:0 8px}
+  .unmatched{color:var(--alert);font-size:16px;margin-top:20px}
+  footer{border-top:1px solid var(--line);margin-top:32px;padding-top:16px;color:var(--muted);font-size:13px;display:flex;justify-content:space-between;gap:12px}
+  @media(max-width:600px){main{width:calc(100% - 32px);padding:24px 0}header{gap:12px}.round{font-size:15px}.person,.couple{min-height:78px;padding:16px}.draw-grid,.couple-list{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <p class="eyebrow">LIVE ROOM STATUS</p>
+      <h1 id="title">현재 상태</h1>
+    </div>
+    <div class="round" id="round"></div>
+  </header>
+  <div class="status"><span class="dot" id="statusDot"></span><span id="statusText">방 상태를 불러오는 중</span></div>
+  <section class="content" id="content" aria-live="polite">
+    <div class="message">호스트의 방 상태를 불러오는 중입니다.</div>
+  </section>
+  <footer><span id="participantCount"></span><span id="updated"></span></footer>
+</main>
+<script>
+let roomId = null;
+let hostToken = null;
+const content = document.getElementById('content');
+const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+
+try{
+  roomId = sessionStorage.getItem('screenRoomId');
+  hostToken = sessionStorage.getItem('screenHostToken');
+}catch(error){}
+
+window.addEventListener('message', event => {
+  if(event.origin !== location.origin || event.data?.type !== 'screen-credentials') return;
+  roomId = event.data.roomId;
+  hostToken = event.data.hostToken;
+  try{
+    sessionStorage.setItem('screenRoomId', roomId);
+    sessionStorage.setItem('screenHostToken', hostToken);
+  }catch(error){}
+  refresh();
+});
+
+function setMessage(message, isError = false){
+  document.getElementById('statusDot').classList.toggle('error', isError);
+  document.getElementById('statusText').textContent = isError ? '연결 확인 필요' : '실시간 업데이트 중';
+  content.innerHTML = `<div class="message${isError ? ' error' : ''}">${escapeHtml(message)}</div>`;
+}
+
+function participantBadges(person, state){
+  const tags = [
+    ['흑기사', person.black_knight_count],
+    ['흑장미권', person.black_rose_ticket_count],
+    ['음주권', person.drink_pass_count],
+  ].filter(([, count]) => Number(count) > 0);
+  return tags.length
+    ? `<span class="tag-badges">${tags.map(([label, count]) => `<span class="tag-badge">${label} ${count}</span>`).join('')}</span>`
+    : '';
+}
+
+function renderState(state){
+  const participants = state.participants || [];
+  const results = state.results || [];
+  const byId = new Map(participants.map(person => [person.id, person]));
+  document.title = `${state.title || '현재 상태'} · 상태 화면`;
+  document.getElementById('title').textContent = state.title || (state.mode === 'couple' ? '커플매칭' : '제비뽑기');
+  document.getElementById('round').textContent = state.current_round > 0 ? `${state.current_round}라운드` : '';
+  document.getElementById('participantCount').textContent = `참가자 ${participants.length}명`;
+  document.getElementById('updated').textContent = `업데이트 ${new Date().toLocaleTimeString('ko-KR', {hour:'2-digit', minute:'2-digit', second:'2-digit'})}`;
+  document.getElementById('statusDot').classList.remove('error');
+  document.getElementById('statusText').textContent = '실시간 업데이트 중';
+
+  if(!participants.length){
+    content.innerHTML = '<div class="message">아직 참가자가 없습니다.</div>';
+    return;
+  }
+
+  if(!results.length){
+    content.innerHTML = `<div class="draw-grid">${participants.map(person => `<div class="person"><span class="person-name">${escapeHtml(person.name)}${participantBadges(person, state)}</span></div>`).join('')}</div>`;
+    return;
+  }
+
+  if(state.mode === 'draw'){
+    const resultById = new Map(results.map(result => [result.participant_id, result]));
+    content.innerHTML = `<div class="draw-grid">${participants.map(person => {
+      const result = resultById.get(person.id);
+      const detail = result?.assigned_number
+        ? `${escapeHtml(result.assigned_number)}번${result.role_label ? `<span class="role">${escapeHtml(result.role_label)}</span>` : ''}`
+        : result ? '<span class="role">미배정</span>' : '';
+      return `<div class="person"><span class="person-name">${escapeHtml(person.name)}${participantBadges(person, state)}</span><span class="person-detail">${detail}</span></div>`;
+    }).join('')}</div>`;
+    return;
+  }
+
+  const seen = new Set();
+  const couples = [];
+  const unmatched = [];
+  for(const result of results){
+    if(!result.partner_id){
+      const person = byId.get(result.participant_id);
+      if(person) unmatched.push(person.name);
+      continue;
+    }
+    const key = [result.participant_id, result.partner_id].sort().join(':');
+    if(seen.has(key)) continue;
+    seen.add(key);
+    couples.push({number:result.assigned_number, a:byId.get(result.participant_id), b:byId.get(result.partner_id)});
+  }
+  couples.sort((a,b) => (a.number || 0) - (b.number || 0));
+  content.innerHTML = `<div class="couple-list">${couples.map(couple => `<div class="couple"><span class="couple-number">${escapeHtml(couple.number)}.</span><span class="couple-names">${escapeHtml(couple.a?.name || '?')}${participantBadges(couple.a || {}, state)}<span class="heart">♥</span>${escapeHtml(couple.b?.name || '?')}${participantBadges(couple.b || {}, state)}</span></div>`).join('')}</div>${unmatched.length ? `<div class="unmatched">짝을 찾지 못한 참가자: ${unmatched.map(escapeHtml).join(', ')}</div>` : ''}`;
+  if(!couples.length && !unmatched.length) content.innerHTML = '<div class="message">표시할 매칭 결과가 없습니다.</div>';
+}
+
+async function refresh(){
+  if(!roomId || !hostToken){
+    setMessage('잘못된 화면 주소입니다. 호스트 화면에서 다시 열어주세요.', true);
+    return;
+  }
+  try{
+    const response = await fetch(`/api/room_state?room_id=${encodeURIComponent(roomId)}&host_token=${encodeURIComponent(hostToken)}`);
+    const data = await response.json();
+    if(!response.ok){
+      setMessage(data.error || '방 상태를 불러오지 못했습니다.', true);
+      return;
+    }
+    renderState(data);
+  }catch(error){
+    setMessage('서버에 연결할 수 없습니다. 연결이 복구되면 자동으로 다시 시도합니다.', true);
+  }
+}
+
+if(window.opener){
+  window.opener.postMessage({type:'screen-ready'}, location.origin);
+}else if(roomId && hostToken){
+  refresh();
+}else{
+  setMessage('호스트 화면에서 상태 화면을 열어주세요.', true);
+}
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>

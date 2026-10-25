@@ -284,9 +284,11 @@
 
   .plist li{
     display:flex;
+    flex-direction:column;
+    align-items:stretch;
     justify-content:space-between;
-    align-items:center;
-    padding:10px 0;
+    gap:10px;
+    padding:12px 0;
     border-top:1px solid var(--line);
     font-size:15px;
   }
@@ -299,6 +301,97 @@
     font-size:12px;
     color:#9AA4B8;
     margin-left:6px;
+  }
+
+  .special-tag{
+    display:inline-block;
+    margin-left:6px;
+    padding:3px 7px;
+    border:1px solid rgba(232,185,88,.42);
+    border-radius:5px;
+    color:var(--gold);
+    font-size:11px;
+    white-space:nowrap;
+  }
+
+  .participant-actions{
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    gap:8px;
+    flex-wrap:wrap;
+  }
+
+  .bulk-controls{
+    display:grid;
+    gap:8px;
+    padding:12px 0;
+    border-top:1px solid var(--line);
+  }
+
+  .bulk-row{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) 88px auto;
+    gap:8px;
+    align-items:center;
+  }
+
+  .bulk-row select,
+  .bulk-row input,
+  .entitlement-inputs input{
+    min-width:0;
+    margin:0;
+    padding:8px;
+    font-size:14px;
+  }
+
+  .bulk-row button{
+    margin:0;
+    padding:8px 10px;
+    font-size:13px;
+  }
+
+  .participant-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+  }
+
+  .participant-select{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    margin:0;
+    color:var(--paper);
+    font-size:15px;
+  }
+
+  .participant-select input,
+  #selectAllParticipants{
+    width:auto;
+    margin:0;
+    accent-color:var(--gold);
+  }
+
+  .entitlement-inputs{
+    display:grid;
+    grid-template-columns:repeat(3,minmax(0,1fr));
+    gap:8px;
+  }
+
+  .entitlement-inputs label{
+    min-width:0;
+    margin:0;
+    color:#C9D0DE;
+    font-size:12px;
+  }
+
+  .bulk-message{
+    min-height:16px;
+    margin:0;
+    color:#E9958C;
+    font-size:12px;
   }
 
   .num{
@@ -472,7 +565,6 @@
       참가자 0명
     </div>
 
-
     <!-- =================================================
          호스트 참가
          ================================================= -->
@@ -492,6 +584,7 @@
         maxlength="30"
       />
 
+      <div class="field-label" id="hostGenderHint">성별 (선택)</div>
 
       <div
         id="hostGenderField"
@@ -535,6 +628,29 @@
     <!-- =================================================
          참가자 목록
          ================================================= -->
+
+    <div class="bulk-controls">
+      <div class="field-label">선택 참가자 수량 일괄 변경</div>
+      <div class="bulk-row">
+        <select id="bulkField" aria-label="수량 항목">
+          <option value="black_knight_count">흑기사</option>
+          <option value="black_rose_ticket_count">흑장미권</option>
+          <option value="drink_pass_count">음주권</option>
+        </select>
+        <input id="bulkCount" type="number" min="0" max="999" step="1" value="0" aria-label="설정할 수량" />
+        <button type="button" class="secondary" id="applyBulkCount">변경</button>
+      </div>
+      <label class="checkbox-row" style="margin:0;">
+        <input type="checkbox" id="bulkAllChk" checked />
+        <span>전체 참가자에 적용 (해제하면 체크한 사람만)</span>
+      </label>
+      <p class="bulk-message" id="bulkMsg"></p>
+    </div>
+
+    <label class="checkbox-row" style="margin:0 0 8px;">
+      <input type="checkbox" id="selectAllParticipants" />
+      <span>참가자 전체 선택</span>
+    </label>
 
     <ul
       class="plist"
@@ -626,6 +742,15 @@
     </button>
 
 
+    <button
+      id="screenBtn"
+      class="secondary"
+      style="margin-top:10px;"
+    >
+      현재 상태 화면 열기
+    </button>
+
+
     <!-- =================================================
          수동 동기화
          ================================================= -->
@@ -700,6 +825,7 @@
   let hostToken;
   let mode = 'draw';
   let channel;
+  let screenWindow = null;
 
   let roomGenderSplit = false;
   let myParticipantId = null;
@@ -823,9 +949,7 @@ const Store = {
       document.getElementById('setup').style.display = 'none';
       document.getElementById('room').style.display = 'block';
 
-      document.getElementById('hostGenderField').style.display =
-        (mode === 'couple' || (mode === 'draw' && roomGenderSplit))
-          ? 'flex' : 'none';
+      updateHostGenderField();
 
       if(mode === 'draw'){
         document.getElementById('rolesEditor').style.display = 'block';
@@ -918,6 +1042,14 @@ const Store = {
   }
 
 
+  function updateHostGenderField(){
+    const required = mode === 'couple' || (mode === 'draw' && roomGenderSplit);
+    document.getElementById('hostGenderField').style.display = 'flex';
+    document.getElementById('hostGenderHint').textContent =
+      required ? '성별 (필수)' : '성별 (선택)';
+  }
+
+
   // =====================================================
   // 참가자 새로고침
   // =====================================================
@@ -1001,12 +1133,14 @@ const Store = {
         return false;
       }
 
+
       const hasResults =
         state.current_round > 0
         &&
         (state.results || []).length > 0;
 
       if(hasResults){
+        renderParticipants(state.participants || []);
         await refreshRoundResults(state);
       }else{
         renderParticipants(
@@ -1046,6 +1180,8 @@ const Store = {
       .textContent =
         `참가자 ${rows.length}명`;
 
+    document.getElementById('selectAllParticipants').checked = false;
+
 
     if(rows.length === 0){
 
@@ -1084,11 +1220,13 @@ const Store = {
 
           return `
             <li>
-              <span>
-                ${escapeHtml(p.name)}
-                ${gender}
-                ${me}
-              </span>
+              <div class="participant-head">
+                <label class="participant-select">
+                  <input type="checkbox" class="participant-check" value="${escapeHtml(p.id)}" />
+                  <span>${escapeHtml(p.name)} ${gender} ${me}</span>
+                </label>
+              </div>
+              ${participantEntitlementInputs(p)}
             </li>
           `;
 
@@ -1096,6 +1234,36 @@ const Store = {
       )
       .join('');
 
+  }
+
+
+  function participantBadges(person){
+    const entitlements = [
+      ['흑기사', person.black_knight_count],
+      ['흑장미권', person.black_rose_ticket_count],
+      ['음주권', person.drink_pass_count],
+    ];
+    return entitlements
+      .filter(([, count]) => Number(count) > 0)
+      .map(([label, count]) => `<span class="special-tag">${label} ${count}</span>`)
+      .join('');
+  }
+
+
+  function participantEntitlementInputs(person){
+    const fields = [
+      ['흑기사', 'black_knight_count', person.gender === 'M' && Number(person.black_knight_count) === 0],
+      ['흑장미권', 'black_rose_ticket_count', person.gender === 'F' && Number(person.black_rose_ticket_count) === 0],
+      ['음주권', 'drink_pass_count', false],
+    ];
+    return `<div class="entitlement-inputs">${fields.map(([label, field, disabled]) => `
+      <label>${label}
+        <input class="entitlement-count" type="number" min="0" max="999" step="1"
+          data-participant-id="${escapeHtml(person.id)}" data-field="${field}"
+          data-previous-count="${Number(person[field]) || 0}"
+          value="${Number(person[field]) || 0}" ${disabled ? 'disabled title="여성 전용 항목"' : ''} />
+      </label>
+    `).join('')}</div>`;
   }
 
 
@@ -1164,16 +1332,17 @@ const Store = {
 
 
     const labelFor =
-      id =>
-        escapeHtml(
-          nameOf(id)
-        )
+      id => {
+        const person = participants.find(p => p.id === id) || {};
+        return escapeHtml(nameOf(id))
+        + participantBadges(person)
         +
         (
           id === myParticipantId
             ? '<span class="me-badge">나</span>'
             : ''
         );
+      }
 
 
     // ===================================================
@@ -1200,6 +1369,8 @@ const Store = {
         }
       );
 
+
+      document.getElementById('selectAllParticipants').checked = false;
 
       document
         .getElementById('plist')
@@ -1260,13 +1431,15 @@ const Store = {
 
             return `
               <li>
-                <span>
-                  ${escapeHtml(p.name)}
-                  ${genderTag}
-                  ${meTag}
-                </span>
-
-                ${right}
+                <div class="participant-head">
+                  <label class="participant-select">
+                    <input type="checkbox" class="participant-check" value="${escapeHtml(p.id)}" />
+                    <span>${escapeHtml(p.name)} ${genderTag} ${meTag}</span>
+                  </label>
+                  <span class="participant-actions">${right}</span>
+                </div>
+                <div class="participant-actions">${participantBadges(p)}</div>
+                ${participantEntitlementInputs(p)}
               </li>
             `;
 
@@ -1610,22 +1783,7 @@ const Store = {
               'block';
 
 
-          document
-            .getElementById(
-              'hostGenderField'
-            )
-            .style.display =
-              (
-                mode === 'couple'
-                ||
-                (
-                  mode === 'draw'
-                  &&
-                  roomGenderSplit
-                )
-              )
-                ? 'flex'
-                : 'none';
+          updateHostGenderField();
 
 
           if(mode === 'draw'){
@@ -2285,6 +2443,138 @@ const Store = {
     });
 
 
+  document.getElementById('plist').addEventListener('change', async event => {
+    if(event.target.matches('.participant-check')){
+      const checks = [...document.querySelectorAll('.participant-check')];
+      document.getElementById('selectAllParticipants').checked =
+        checks.length > 0 && checks.every(check => check.checked);
+      return;
+    }
+
+    const input = event.target.closest('.entitlement-count');
+    if(!input) return;
+    const count = Number(input.value);
+    if(!Number.isInteger(count) || count < 0 || count > 999){
+      input.value = input.dataset.previousCount;
+      return;
+    }
+
+    input.disabled = true;
+    try{
+      const data = await updateEntitlements({
+        participant_ids: [input.dataset.participantId],
+        field: input.dataset.field,
+        count,
+      });
+      if(data.skipped.length){
+        document.getElementById('roomMsg').textContent =
+          '항목 성별에 맞지 않아 변경하지 않았어요.';
+      }
+      await syncRoom();
+    }catch(err){
+      input.value = input.dataset.previousCount;
+      document.getElementById('roomMsg').textContent = err.message;
+      input.disabled = false;
+    }
+  });
+
+
+  document.getElementById('selectAllParticipants').addEventListener('change', event => {
+    document.querySelectorAll('.participant-check').forEach(check => {
+      check.checked = event.currentTarget.checked;
+    });
+  });
+
+
+  document.getElementById('applyBulkCount').addEventListener('click', async event => {
+    const button = event.currentTarget;
+    const count = Number(document.getElementById('bulkCount').value);
+    const applyToAll = document.getElementById('bulkAllChk').checked;
+    const participantIds = [...document.querySelectorAll('.participant-check:checked')]
+      .map(check => check.value);
+    const message = document.getElementById('bulkMsg');
+
+    message.textContent = '';
+    if(!Number.isInteger(count) || count < 0 || count > 999){
+      message.textContent = '수량은 0에서 999 사이의 정수로 입력해주세요.';
+      return;
+    }
+    if(!applyToAll && !participantIds.length){
+      message.textContent = '변경할 참가자를 체크해주세요.';
+      return;
+    }
+
+    button.disabled = true;
+    try{
+      const data = await updateEntitlements({
+        all: applyToAll,
+        participant_ids: participantIds,
+        field: document.getElementById('bulkField').value,
+        count,
+      });
+      message.textContent = data.skipped.length
+        ? `${data.updated}명 변경, 성별이 맞지 않는 ${data.skipped.length}명은 제외했어요.`
+        : `${data.updated}명의 수량을 변경했어요.`;
+      await syncRoom();
+    }catch(err){
+      message.textContent = err.message;
+    }finally{
+      button.disabled = false;
+    }
+  });
+
+
+  async function updateEntitlements(payload){
+    const res = await fetch('/api/set_entitlements', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_id: roomId, host_token: hostToken, ...payload }),
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error || '수량을 저장하지 못했어요.');
+    return data;
+  }
+
+
+  document
+    .getElementById('screenBtn')
+    .addEventListener('click', () => {
+
+      if(!roomId || !hostToken){
+        document.getElementById('roomMsg').textContent =
+          '방 정보가 없습니다.';
+        return;
+      }
+
+      const screen = window.open('/screen', '_blank');
+
+      if(!screen){
+        document.getElementById('roomMsg').textContent =
+          '팝업이 차단되었어요. 이 사이트의 팝업을 허용해주세요.';
+        return;
+      }
+
+      screenWindow = screen;
+
+    });
+
+  window.addEventListener('message', event => {
+    if(
+      event.origin !== window.location.origin
+      || event.data?.type !== 'screen-ready'
+      || event.source !== screenWindow
+    ){
+      return;
+    }
+
+    event.source.postMessage({
+      type: 'screen-credentials',
+      roomId,
+      hostToken,
+    }, event.origin);
+  });
+
+
   // =====================================================
   // 형태 변경 (같은 참가자 유지, 방을 나가거나 새로 만들지 않음)
   // =====================================================
@@ -2355,10 +2645,7 @@ const Store = {
           document.getElementById('drawBtn').textContent =
             mode === 'couple' ? '매칭 시작' : '뽑기 시작';
 
-          document.getElementById('hostGenderField').style.display =
-            (mode === 'couple' || (mode === 'draw' && roomGenderSplit))
-              ? 'flex'
-              : 'none';
+          updateHostGenderField();
 
           document.getElementById('rolesEditor').style.display =
             mode === 'draw' ? 'block' : 'none';

@@ -19,6 +19,11 @@ ROOM_INACTIVE_HOURS = int(os.environ.get("ROOM_INACTIVE_HOURS", "24"))
 
 CODE_ALPHABET = "".join(c for c in string.ascii_uppercase if c not in "OI") + "23456789"
 VALID_MODES = {"draw", "couple"}
+ENTITLEMENT_FIELDS = {
+    "black_knight_count": "F",
+    "black_rose_ticket_count": "M",
+    "drink_pass_count": None,
+}
 
 
 def utc_now_iso():
@@ -45,7 +50,7 @@ def gen_code(n=5):
 def get_room(room_id=None, code=None):
     params = {
         "select": "id,code,title,mode,status,current_round,host_token,"
-                  "gender_split,number_roles,created_at,last_activity_at"
+                  "gender_split,number_roles,drink_pass_enabled,created_at,last_activity_at"
     }
     if room_id:
         params["id"] = f"eq.{room_id}"
@@ -137,6 +142,7 @@ def join_room():
     if needs_gender:
         if gender not in ("M", "F"):
             return jsonify({"error": "성별을 선택해주세요."}), 400
+    if gender in ("M", "F"):
         payload["gender"] = gender
 
     join_secret = secrets.token_urlsafe(24)
@@ -163,7 +169,10 @@ def my_result():
     resp = requests.get(
         sb_url("participants"),
         headers=sb_headers(),
-        params={"id": f"eq.{participant_id}", "select": "id,room_id,name,join_secret"},
+        params={
+            "id": f"eq.{participant_id}",
+            "select": "id,room_id,name,join_secret,black_knight_count,black_rose_ticket_count,drink_pass_count",
+        },
         timeout=10,
     )
     rows = resp.json()
@@ -176,7 +185,12 @@ def my_result():
         return jsonify({"error": "존재하지 않는 방이에요."}), 404
 
     if room["current_round"] == 0:
-        return jsonify({"waiting": True, "mode": room["mode"]})
+        return jsonify({
+            "waiting": True, "mode": room["mode"],
+            "black_knight_count": participant.get("black_knight_count", 0),
+            "black_rose_ticket_count": participant.get("black_rose_ticket_count", 0),
+            "drink_pass_count": participant.get("drink_pass_count", 0),
+        })
 
     resp = requests.get(
         sb_url("draw_results"),
@@ -190,7 +204,12 @@ def my_result():
     )
     rows = resp.json()
     if not rows:
-        return jsonify({"waiting": True, "mode": room["mode"]})
+        return jsonify({
+            "waiting": True, "mode": room["mode"],
+            "black_knight_count": participant.get("black_knight_count", 0),
+            "black_rose_ticket_count": participant.get("black_rose_ticket_count", 0),
+            "drink_pass_count": participant.get("drink_pass_count", 0),
+        })
     result = rows[0]
 
     partner_name = None
@@ -208,6 +227,9 @@ def my_result():
         "waiting": False, "mode": room["mode"],
         "round_no": result["round_no"], "assigned_number": result["assigned_number"],
         "role_label": result.get("role_label"), "partner_name": partner_name,
+        "black_knight_count": participant.get("black_knight_count", 0),
+        "black_rose_ticket_count": participant.get("black_rose_ticket_count", 0),
+        "drink_pass_count": participant.get("drink_pass_count", 0),
     })
 
 
@@ -352,7 +374,11 @@ def room_state():
     resp = requests.get(
         sb_url("participants"),
         headers=sb_headers(),
-        params={"room_id": f"eq.{room_id}", "select": "id,name,gender,joined_at", "order": "joined_at.asc"},
+        params={
+            "room_id": f"eq.{room_id}",
+            "select": "id,name,gender,black_knight_count,black_rose_ticket_count,drink_pass_count,joined_at",
+            "order": "joined_at.asc",
+        },
         timeout=10,
     )
     participants = resp.json()
@@ -371,12 +397,84 @@ def room_state():
         results = resp.json()
 
     return jsonify({
-        "mode": room["mode"], "status": room["status"], "current_round": room["current_round"],
+        "title": room["title"], "mode": room["mode"], "status": room["status"], "current_round": room["current_round"],
         "gender_split": room["gender_split"],
         "number_roles": room.get("number_roles") or {},
         "participants": participants,
         "results": results,
     })
+
+
+@app.route("/api/set_entitlements", methods=["POST"])
+def set_entitlements():
+    data = request.get_json(force=True, silent=True) or {}
+    room_id = data.get("room_id")
+    host_token = data.get("host_token")
+    participant_ids = data.get("participant_ids")
+    apply_to_all = data.get("all") is True
+    field = data.get("field")
+    count = data.get("count")
+    if not room_id or not host_token or field not in ENTITLEMENT_FIELDS:
+        return jsonify({"error": "잘못된 요청이에요."}), 400
+    if type(count) is not int or count < 0 or count > 999:
+        return jsonify({"error": "수량은 0에서 999 사이의 정수로 입력해주세요."}), 400
+    if not apply_to_all and (
+        not isinstance(participant_ids, list)
+        or not participant_ids
+        or any(not isinstance(participant_id, str) for participant_id in participant_ids)
+    ):
+        return jsonify({"error": "변경할 참가자를 선택해주세요."}), 400
+
+    room = get_room(room_id=room_id)
+    if not room or room["host_token"] != host_token:
+        return jsonify({"error": "권한이 없어요."}), 403
+
+    select = "id,name,gender," + ",".join(ENTITLEMENT_FIELDS)
+    resp = requests.get(
+        sb_url("participants"),
+        headers=sb_headers(),
+        params={"room_id": f"eq.{room_id}", "select": select},
+        timeout=10,
+    )
+    participants = resp.json()
+    if apply_to_all:
+        targets = participants
+    else:
+        selected_ids = set(participant_ids)
+        targets = [person for person in participants if person["id"] in selected_ids]
+        if len(targets) != len(selected_ids):
+            return jsonify({"error": "선택한 참가자 중 방에서 찾을 수 없는 사람이 있어요."}), 404
+
+    required_gender = ENTITLEMENT_FIELDS[field]
+    updated = 0
+    skipped = []
+    for person in targets:
+        gender = person.get("gender")
+        if required_gender and count > 0 and gender not in (required_gender, None):
+            skipped.append(person["name"])
+            continue
+
+        updates = {field: count}
+        if required_gender and count > 0 and gender is None:
+            if apply_to_all:
+                skipped.append(person["name"])
+                continue
+            updates["gender"] = required_gender
+
+        resp = requests.patch(
+            sb_url("participants"),
+            headers=sb_headers(),
+            params={"id": f"eq.{person['id']}", "room_id": f"eq.{room_id}"},
+            json=updates,
+            timeout=10,
+        )
+        if resp.status_code not in (200, 204):
+            return jsonify({"error": resp.text}), 500
+        updated += 1
+
+    if updated:
+        touch_room(room_id)
+    return jsonify({"ok": True, "updated": updated, "skipped": skipped})
 
 
 @app.route("/api/start_round", methods=["POST"])
