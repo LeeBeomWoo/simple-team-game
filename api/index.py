@@ -180,8 +180,7 @@ def join_room():
     room = get_room(code=code)
     if not room:
         return jsonify({"error": "존재하지 않는 방 코드예요."}), 404
-    if room["status"] != "waiting":
-        return jsonify({"error": "이미 시작된 방이라 더 이상 참가할 수 없어요."}), 400
+    # 게임이 진행 중(active)이어도 참가 가능 — 다음 start_round부터 자동으로 포함됨
 
     current = count_rows("participants", {"room_id": f"eq.{room['id']}"})
     if current is not None and current >= MAX_PARTICIPANTS_PER_ROOM:
