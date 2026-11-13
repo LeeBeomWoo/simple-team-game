@@ -87,7 +87,7 @@
     <div id="waitBox" class="wait" style="display:none;">
       <div class="name" id="whoAmI"></div>
       <div class="personal-tags" id="personalTags"></div>
-      <div class="dots" id="waitDots">방장이 시작하기를 기다리는 중…</div>
+      <div class="dots" id="waitDots">다음 라운드를 기다리는 중…</div>
     </div>
 
     <div id="revealBox" class="reveal" style="display:none;">
@@ -162,7 +162,6 @@ document.getElementById('nextBtn').addEventListener('click', async () => {
     const res = await fetch(`/api/room_info?code=${encodeURIComponent(code)}`);
     const data = await res.json();
     if(!res.ok) throw new Error(data.error || '방을 찾을 수 없어요.');
-    if(data.status !== 'waiting') throw new Error('이미 시작된 방이라 더 이상 참가할 수 없어요.');
     roomMode = data.mode;
     needsGender = roomMode === 'couple' || (roomMode === 'draw' && data.gender_split);
     document.getElementById('pageTitle').textContent = data.title || '참가하기';
